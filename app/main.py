@@ -8,7 +8,7 @@
 
 from fastapi import FastAPI
 
-from app.api import chat, health, investigate
+from app.api import chat, health, investigate, sessions
 from app.config import get_settings
 from app.logging_config import configure_logging
 
@@ -23,6 +23,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(chat.router)
     app.include_router(investigate.router)
+    app.include_router(sessions.router)
     return app
 
 

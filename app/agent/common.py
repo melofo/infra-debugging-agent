@@ -21,12 +21,21 @@ Method:
 2. Gather evidence: find when errors started (logs), what changed around that time (deploys), \
 and what known guidance exists (runbooks).
 3. Compare competing hypotheses. Do not stop at the first plausible one.
-4. When you have enough evidence, call submit_rca_report exactly once to finish.
+4. When you have enough evidence, call submit_rca_report. After it is accepted, reply to the \
+engineer in one or two plain sentences that directly answer their message.
+
+Follow-up questions:
+After the report is submitted the engineer may ask follow-up questions. Answer in concise plain \
+text. Reuse data you already gathered earlier in the conversation; call tools only if you need new \
+data. Only call submit_rca_report again if the engineer asks you to revise the report.
 
 Rules:
-- Every hypothesis must cite concrete evidence from tool results. Use the source and a reference \
-(for example a commit sha or the log message) so a human can verify it.
-- Confidence is between 0 and 1. If evidence is weak, lower it and say what to check next.
+- Every hypothesis must cite concrete evidence from tool results. The reference must be exactly \
+verifiable by a human: a commit sha, the exact log message, a runbook id or a ticket id. \
+Never use a tool name as a reference.
+- If the engineer asked a specific question, the report summary must answer it directly.
+- Confidence is between 0 and 1. If evidence is weak, lower it and say what to check next. \
+Do not use 1.0: you cannot be completely certain from logs alone.
 - Never invent data. If you lack information, say so in the summary."""
 
 SUBMIT_TOOL_NAME = "submit_rca_report"
@@ -49,9 +58,17 @@ class SubmitRCAArgs(BaseModel):
 def submit_spec() -> ToolSpec:
     return ToolSpec(
         name=SUBMIT_TOOL_NAME,
-        description="Finish the investigation by submitting the root cause analysis report. Call it once, last.",
+        description="Finish the investigation by submitting the root cause analysis report, once all evidence is gathered.",
         parameters=SubmitRCAArgs.model_json_schema(),
     )
+
+
+def session_system_prompt(ticket_id: str) -> str:
+    """会话专用的系统提示词：在通用提示词后面补上"这个会话在调查哪张工单"。
+
+    这样用户的第一句话即使没写工单号（例如只说"开始调查"），模型也知道该查哪一个。
+    """
+    return f"{SYSTEM_PROMPT}\n\nThis conversation is about ticket {ticket_id}."
 
 
 def build_report(ticket_id: str, args: SubmitRCAArgs) -> RCAReport:
@@ -75,7 +92,13 @@ class StepRecord:
 
 @dataclass
 class InvestigationResult:
-    report: RCAReport
+    """一轮对话（turn）的结果。
+
+    首轮调查：report 有值。后续追问：通常只有 answer（文字），除非模型被要求修订报告。
+    """
+
+    answer: str
+    report: RCAReport | None = None
     steps: list[StepRecord] = field(default_factory=list)
     llm_calls: int = 0
     input_tokens: int = 0

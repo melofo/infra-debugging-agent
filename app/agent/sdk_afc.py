@@ -113,8 +113,10 @@ class SdkAfcAgent:
         if not submitted:
             raise AgentError("model finished without submitting a valid report")
 
+        report = build_report(ticket_id, submitted[-1])
         return InvestigationResult(
-            report=build_report(ticket_id, submitted[-1]),
+            answer=report.summary,
+            report=report,
             steps=steps,
             llm_calls=-1,  # SDK 不告诉我们内部发了几次请求，这也是框架"黑盒"的代价之一
             input_tokens=response.input_tokens,  # 只是最后一次请求的用量，不是总和

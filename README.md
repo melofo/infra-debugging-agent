@@ -11,6 +11,12 @@ An AI agent that investigates production incidents. Given a Jira ticket, it quer
 - Two interchangeable agent implementations, selectable with `mode`:
   - `loop` – a hand-written tool-calling loop (`app/agent/loop.py`): every step is visible and controllable.
   - `sdk` – the Google GenAI SDK's automatic function calling (`app/agent/sdk_afc.py`): much shorter, but the loop is a black box.
+- **Sessions with follow-up questions** – the first message of a session runs the investigation; later messages continue the same agent loop with the full history (including earlier tool results), so follow-ups are answered from data already gathered.
+  - `POST /sessions` → create a session
+  - `POST /sessions/{id}/messages` → send a message, get the whole turn as JSON
+  - `POST /sessions/{id}/messages/stream` → same, but streamed as Server-Sent Events (`step` events while the agent works, then one `turn` event)
+  - `GET /sessions/{id}` → transcript
+  - Safeguards: one message at a time per session (409 otherwise), failed turns are rolled back, turn and session count limits.
 - `POST /chat` – plain LLM chat; `GET /health` – liveness check.
 
 ## Design notes

@@ -22,6 +22,17 @@ def make_hypothesis(cause: str, confidence: float) -> Hypothesis:
     return Hypothesis(root_cause=cause, confidence=confidence, evidence=[make_evidence()])
 
 
+def test_runbook_evidence_never_has_an_observation_time():
+    # Runbook 是静态文档，模型填的 observed_at 会被悄悄清掉；其他来源的时间保留。
+    from datetime import datetime, timezone
+
+    moment = datetime(2026, 10, 20, 14, 2, tzinfo=timezone.utc)
+    runbook = Evidence(source=EvidenceSource.RUNBOOK, summary="s", reference="RB-101", observed_at=moment)
+    log = Evidence(source=EvidenceSource.LOG, summary="s", reference="line", observed_at=moment)
+    assert runbook.observed_at is None
+    assert log.observed_at == moment
+
+
 def test_incident_defaults():
     incident = Incident(id="BUG-1042", title="Checkout 500s", service="checkout-api")
     assert incident.severity == "medium"

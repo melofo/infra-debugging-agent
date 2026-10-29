@@ -64,6 +64,16 @@ class Evidence(BaseModel):
     reference: str = Field(min_length=1, description="可追溯的出处，如 commit SHA 或查询语句")
     observed_at: datetime | None = None
 
+    @model_validator(mode="after")
+    def _runbook_has_no_observation_time(self) -> "Evidence":
+        # Runbook 是静态文档，没有"发生时间"。模型偶尔会顺手填上别的时间（比如工单时间），
+        # 这是结构上不合理的数据。这里选择【悄悄纠正】而不是拒绝：
+        # 拒绝会让模型多重试一整圈（多一次调用、多花钱），而这个错误无害，纠正就够了。
+        # 对比"假设必须有证据"：那条是实质性缺陷，所以选择拒绝并让模型重写。两种处理要分清。
+        if self.source == EvidenceSource.RUNBOOK:
+            self.observed_at = None
+        return self
+
 
 class Hypothesis(BaseModel):
     """一个根因假设。

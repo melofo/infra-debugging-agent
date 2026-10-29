@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     llm_max_attempts: int = 4  # 遇到 429/503 时的最大尝试次数（含第一次）；设为 1 表示不重试
     # Agent 最多调用模型多少轮。硬上限，防止死循环烧钱。
     agent_max_steps: int = 8
+    # 会话的资源上限。会话存在服务器内存里，没有上限的话，有人不停创建会话就能把内存耗尽（简单的 DoS）。
+    max_sessions: int = 100
+    max_turns_per_session: int = 20  # 同时也限制了历史（以及 token 成本）的增长
 
     # env_file：本地开发从项目根目录的 .env 读取。
     # extra="ignore"：.env 里有我们没声明的变量时不报错。

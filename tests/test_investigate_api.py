@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.api.chat import get_llm_client
 from app.main import app
 from app.scenario import load_scenario
-from tests.fakes import SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls
+from tests.fakes import SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls, final_text
 
 
 def client_with(llm) -> TestClient:
@@ -23,6 +23,7 @@ def test_investigate_returns_report_and_steps():
         [
             calls(ToolCall("get_ticket", {"ticket_id": "BUG-1042"})),
             calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
+            final_text(),
         ]
     )
     response = client_with(llm).post("/investigate", json={"scenario": "bug-1042", "mode": "loop"})
@@ -31,7 +32,7 @@ def test_investigate_returns_report_and_steps():
     body = response.json()
     assert body["report"]["incident_id"] == "BUG-1042"
     assert [s["tool"] for s in body["steps"]] == ["get_ticket", SUBMIT_TOOL_NAME]
-    assert body["llm_calls"] == 2
+    assert body["llm_calls"] == 3
 
 
 @pytest.mark.parametrize("bad_name", ["../../.env", "BUG_1042", "a/b", "..", "UPPER"])

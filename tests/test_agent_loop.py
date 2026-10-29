@@ -12,7 +12,7 @@ from app.agent.common import AgentError
 from app.agent.loop import InvestigationAgent
 from app.agent.tools import build_investigation_tools
 from app.scenario import load_scenario
-from tests.fakes import SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls
+from tests.fakes import SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls, final_text
 
 
 @pytest.fixture
@@ -27,6 +27,7 @@ async def test_happy_path_runs_tools_then_submits_report(registry):
             calls(ToolCall("search_logs", {"service": "checkout-api", "level": "ERROR"})),
             calls(ToolCall("get_recent_deploys", {"service": "checkout-api"})),
             calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
+            final_text(),
         ]
     )
     result = await InvestigationAgent(llm, registry).investigate("BUG-1042")
@@ -35,9 +36,9 @@ async def test_happy_path_runs_tools_then_submits_report(registry):
     assert "maximumPoolSize" in result.report.hypotheses[0].root_cause
     assert [s.tool for s in result.steps] == ["get_ticket", "search_logs", "get_recent_deploys", SUBMIT_TOOL_NAME]
     assert all(s.ok for s in result.steps)
-    # token 用量被累加：4 次调用，每次 10 + 5。
-    assert result.llm_calls == 4
-    assert (result.input_tokens, result.output_tokens) == (40, 20)
+    # token 用量被累加：5 次调用（4 次调查 + 1 次文字收尾），每次 10 + 5。
+    assert result.llm_calls == 5
+    assert (result.input_tokens, result.output_tokens) == (50, 25)
 
 
 async def test_tool_results_are_fed_back_to_the_model(registry):
@@ -45,6 +46,7 @@ async def test_tool_results_are_fed_back_to_the_model(registry):
         [
             calls(ToolCall("get_ticket", {"ticket_id": "BUG-1042"})),
             calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
+            final_text(),
         ]
     )
     await InvestigationAgent(llm, registry).investigate("BUG-1042")
@@ -60,6 +62,7 @@ async def test_tool_error_is_returned_to_model_not_raised(registry):
         [
             calls(ToolCall("delete_database", {})),  # 模型编造了一个不存在的工具
             calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
+            final_text(),
         ]
     )
     result = await InvestigationAgent(llm, registry).investigate("BUG-1042")
@@ -79,6 +82,7 @@ async def test_report_without_evidence_is_rejected_and_model_can_retry(registry)
         [
             calls(ToolCall(SUBMIT_TOOL_NAME, bad_args)),
             calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
+            final_text(),
         ]
     )
     result = await InvestigationAgent(llm, registry).investigate("BUG-1042")
@@ -93,6 +97,7 @@ async def test_text_only_answer_is_nudged_to_submit(registry):
         [
             calls(text="I think it is the database."),  # 没调工具，也没提交
             calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
+            final_text(),
         ]
     )
     result = await InvestigationAgent(llm, registry).investigate("BUG-1042")

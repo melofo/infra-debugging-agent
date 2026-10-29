@@ -42,3 +42,8 @@ VALID_REPORT_ARGS = {
         }
     ],
 }
+
+
+def final_text(text: str = "Investigation complete, see the report.") -> LLMResponse:
+    """提交报告之后，模型用文字收尾的那一次响应。"""
+    return calls(text=text)

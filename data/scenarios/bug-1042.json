@@ -1,0 +1,39 @@
+{
+  "ticket": {
+    "id": "BUG-1042",
+    "title": "Checkout API intermittently returns HTTP 500",
+    "description": "Customers report random failures at checkout since about 2pm UTC. Retrying sometimes works.",
+    "service": "checkout-api",
+    "severity": "high",
+    "reported_at": "2026-10-20T14:20:00Z"
+  },
+  "logs": [
+    {"timestamp": "2026-10-20T13:40:05Z", "service": "checkout-api", "level": "INFO", "message": "Order placed order_id=88123 total=42.10"},
+    {"timestamp": "2026-10-20T13:58:00Z", "service": "checkout-api", "level": "INFO", "message": "Application started version=2.14.0 hikari.maximumPoolSize=5"},
+    {"timestamp": "2026-10-20T14:02:11Z", "service": "checkout-api", "level": "ERROR", "message": "HikariPool-1 - Connection is not available, request timed out after 30000ms (total=5, active=5, idle=0, waiting=37)"},
+    {"timestamp": "2026-10-20T14:02:11Z", "service": "checkout-api", "level": "ERROR", "message": "POST /checkout failed status=500 cause=SQLTransientConnectionException"},
+    {"timestamp": "2026-10-20T14:05:30Z", "service": "checkout-api", "level": "WARN", "message": "Slow response from payment gateway latency_ms=1800"},
+    {"timestamp": "2026-10-20T14:07:42Z", "service": "checkout-api", "level": "ERROR", "message": "HikariPool-1 - Connection is not available, request timed out after 30000ms (total=5, active=5, idle=0, waiting=52)"},
+    {"timestamp": "2026-10-20T14:07:42Z", "service": "checkout-api", "level": "ERROR", "message": "POST /checkout failed status=500 cause=SQLTransientConnectionException"},
+    {"timestamp": "2026-10-20T14:10:15Z", "service": "checkout-api", "level": "INFO", "message": "Order placed order_id=88290 total=15.00"},
+    {"timestamp": "2026-10-20T14:12:00Z", "service": "checkout-api", "level": "WARN", "message": "Cache miss ratio 0.42 for key prefix=catalog"},
+    {"timestamp": "2026-10-20T14:15:09Z", "service": "checkout-api", "level": "ERROR", "message": "HikariPool-1 - Connection is not available, request timed out after 30000ms (total=5, active=5, idle=0, waiting=61)"},
+    {"timestamp": "2026-10-20T14:15:09Z", "service": "checkout-api", "level": "ERROR", "message": "POST /checkout failed status=500 cause=SQLTransientConnectionException"},
+    {"timestamp": "2026-10-20T14:18:44Z", "service": "checkout-api", "level": "INFO", "message": "Order placed order_id=88377 total=73.99"},
+    {"timestamp": "2026-10-20T14:03:00Z", "service": "payments-service", "level": "INFO", "message": "Charge succeeded charge_id=ch_9921 amount=42.10"}
+  ],
+  "deploys": [
+    {"timestamp": "2026-10-15T09:10:00Z", "service": "checkout-api", "version": "2.13.2", "commit": "9f3a1c2", "author": "dlee", "summary": "Fix typo in order confirmation email", "diff_summary": "templates/order_confirmation.html: 1 line changed"},
+    {"timestamp": "2026-10-20T11:30:00Z", "service": "payments-service", "version": "5.2.1", "commit": "c4d90aa", "author": "mchen", "summary": "Bump logging library", "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"},
+    {"timestamp": "2026-10-20T13:55:00Z", "service": "checkout-api", "version": "2.14.0", "commit": "7be41d0", "author": "kpatel", "summary": "Reduce idle database connection cost", "diff_summary": "application.yml: spring.datasource.hikari.maximumPoolSize 50 -> 5"}
+  ],
+  "runbooks": [
+    {"id": "RB-007", "title": "General HTTP 5xx investigation checklist", "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."},
+    {"id": "RB-101", "title": "Database connection pool exhaustion", "content": "Symptoms: 'Connection is not available, request timed out' from HikariPool, intermittent 500 under load, waiting threads growing. Checks: compare maximumPoolSize with expected concurrency, look for recent config changes to pool settings, look for slow queries holding connections. Mitigation: restore previous pool size via config rollback."},
+    {"id": "RB-210", "title": "Payment gateway latency", "content": "Symptoms: slow response from payment gateway, latency_ms above 1500. Usually causes slow checkouts but not HTTP 500. Check the gateway status page and retry configuration."}
+  ],
+  "ground_truth": {
+    "root_cause": "Deploy 2.14.0 reduced hikari maximumPoolSize from 50 to 5, so the database connection pool is exhausted under load",
+    "keywords": ["maximumPoolSize", "connection pool", "2.14.0"]
+  }
+}

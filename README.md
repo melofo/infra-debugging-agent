@@ -61,6 +61,16 @@ Run the tests (no API key needed):
 pytest
 ```
 
+## Chat UI
+
+A Next.js front end lives in `frontend/` (see `frontend/README.md`). With the backend running:
+
+```bash
+cd frontend && npm install && npm run dev   # http://localhost:3000
+```
+
+The backend allows browser calls from `http://localhost:3000` by default (CORS allowlist, configurable with `CORS_ORIGINS`).
+
 ## Known limitations
 
 - No authentication or rate limiting yet: run it locally only.

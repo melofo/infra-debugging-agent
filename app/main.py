@@ -7,6 +7,7 @@
 """
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import chat, health, investigate, sessions
 from app.config import get_settings
@@ -19,6 +20,20 @@ def create_app() -> FastAPI:
     configure_logging(settings.log_level)
 
     app = FastAPI(title=settings.app_name)
+
+    # 【CORS：跨域资源共享】
+    # 浏览器有"同源策略"：网页（localhost:3000）默认不允许去调用另一个来源（localhost:8000）的接口，
+    # 哪怕只是端口不同。这是为了防止恶意网页借用你的登录状态偷偷访问别的网站。
+    # 解除限制要由【服务端】明确声明"我允许哪些来源"：浏览器先发一个 OPTIONS 预检请求问一下，
+    # 服务端回答允许，才会发真正的请求。
+    # 注意：CORS 只约束浏览器，curl 和别的服务器不受影响，所以它【不是】认证手段。
+    # 这里用白名单而不是 "*"（允许所有来源）；以后加了登录，allow_origins 为 * 时浏览器也不会带凭证。
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
     # Router 相当于 Spring 的 @RestController：每个文件负责一组接口，这里统一注册。
     app.include_router(health.router)
     app.include_router(chat.router)

@@ -87,6 +87,20 @@ Database integration tests use a separate `agent_test` database, refuse to run a
 
 A worker runs inside the API process (started in the app lifespan) and executes queued jobs with the same investigation agent the chat uses, storing the report in the job's `result`. It processes one job at a time (model rate limits), retries transient failures with exponential backoff, fails permanently on bad data, enforces a per-job timeout, reclaims jobs whose worker disappeared, and on shutdown releases its current job back to the queue without using an attempt. Several instances can run side by side safely (`FOR UPDATE SKIP LOCKED`). It only starts when the LLM is configured; set `WORKER_ENABLED=false` to disable it. Tests disable it by default so they can never spend real model quota.
 
+## Try the whole Jira flow without Jira
+
+`scripts/simulate_jira.py` plays Jira: it builds Jira-format events, signs them with `JIRA_WEBHOOK_SECRET` and posts them to the webhook (the secret is never printed). With the backend and database running:
+
+```bash
+docker compose up -d db
+.venv/bin/uvicorn app.main:app --reload                      # terminal 1
+.venv/bin/python scripts/simulate_jira.py created --wait     # terminal 2: queue a Bug and wait for the report
+```
+
+Then open http://localhost:3000/jobs to watch the job go Queued, Running, Done. Other scenarios exercise the security and retry rules: `duplicate` (redelivery is deduplicated), `bad-signature`, `tampered`, `no-signature`, `wrong-method` (all rejected with 401), `non-bug`, `updated`, `unknown-ticket` (acknowledged and ignored). Each prints the status code it expects and exits non-zero if the server disagrees.
+
+`scripts/check_env.py` verifies that `.env` is read correctly without printing any secret.
+
 ## Automatic investigations (results)
 
 - `GET /jobs` – recent jobs with a preview (status, attempts, most likely cause and confidence); `GET /jobs/{id}` – full detail including the RCA report and the agent's steps.

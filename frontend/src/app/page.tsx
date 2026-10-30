@@ -66,6 +66,10 @@ export default function Home() {
       );
     } catch (e) {
       if (controller.signal.aborted) return; // 是我们主动取消的，不算错误
+      // 404 = 服务端不认识这个会话（会话存在服务器内存里，服务重启就没了）。
+      // 既然知道它已经失效，就丢掉它：否则之后每条消息都会拿着这个死 id 再 404 一次，
+      // 用户得手动点 New session 才能恢复。丢掉之后，下一条消息会自动创建新会话。
+      if (e instanceof ApiError && e.status === 404) setSession(null);
       setError(e instanceof ApiError ? describeError(e) : "Could not reach the server. Is the backend running?");
     } finally {
       setPending(null);
@@ -168,7 +172,7 @@ function describeError(error: ApiError): string {
     case 409:
       return "The session is busy or reached its turn limit. Wait a moment, or start a new session.";
     case 404:
-      return "The session no longer exists (the server may have restarted). Start a new session.";
+      return "This session no longer exists (the server probably restarted). Your next message starts a new one; the answers above stay on screen, but the agent no longer remembers them.";
     case 502:
       return "The language model service had a problem (it may be rate limited). Try again in a moment.";
     default:

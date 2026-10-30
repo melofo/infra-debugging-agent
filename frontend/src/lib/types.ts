@@ -61,3 +61,46 @@ export interface SessionInfo {
   total_input_tokens: number;
   total_output_tokens: number;
 }
+
+// ---------------------------------------------------------------------------
+// 自动调查任务（Jira Webhook 触发的），对应后端 app/api/jobs.py
+// ---------------------------------------------------------------------------
+
+export type JobStatus = "queued" | "running" | "succeeded" | "failed";
+
+/** 列表页用的精简信息。 */
+export interface JobSummary {
+  id: string;
+  ticket_id: string;
+  status: JobStatus;
+  attempts: number;
+  max_attempts: number;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  top_cause: string | null; // 排名第一的根因（仅成功的任务有）
+  confidence: number | null;
+}
+
+export interface JobResult {
+  answer: string;
+  report: RCAReport;
+  steps: Step[];
+  llm_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  latency_ms: number;
+}
+
+/** 详情页用：在 JobSummary 的基础上多了完整结果。`extends` 和 Java 里的继承一样。 */
+export interface JobDetail extends JobSummary {
+  scenario: string;
+  run_after: string;
+  result: JobResult | null;
+}
+
+/** 任务是否已经结束（不会再变化）。 */
+export function isFinished(status: JobStatus): boolean {
+  return status === "succeeded" || status === "failed";
+}

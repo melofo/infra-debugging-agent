@@ -43,6 +43,15 @@ from app.scenario import load_scenario
 logger = logging.getLogger(__name__)
 
 
+class InvalidJob(Exception):
+    """任务本身有问题（引用的数据不存在或已损坏），重试也没用。
+
+    消息是写给【用户看】的：它会被存进 last_error，通过 API 返回、显示在页面上。
+    所以只能包含对用户有意义、对攻击者没用的信息，绝不能带内部路径、堆栈、SQL 之类的细节。
+    （细节只写进服务端日志，见 process。）
+    """
+
+
 def make_worker_id() -> str:
     """每个 worker 的唯一标识，写进任务的 locked_by，排查问题时能看出是谁领走的。"""
     return f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:6]}"
@@ -134,17 +143,21 @@ class Worker:
             await jobs.release(self._pool, job.id, self.worker_id, job.attempts)
             logger.info("job released back to the queue", extra=log)
             raise
-        except (FileNotFoundError, ValueError) as exc:
+        except InvalidJob as exc:
             # 任务引用的数据不存在或已损坏。这种问题重试一百次也一样，直接最终失败，别浪费钱。
             await self._fail(job, f"invalid job: {exc}", permanent=True)
         except TimeoutError:
             await self._fail(job, f"investigation timed out after {self._settings.job_timeout_seconds:g}s")
         except (LLMError, AgentError) as exc:
             # 模型服务出问题（限流、过载）或 Agent 没能完成：可能是暂时的，按退避重试。
-            await self._fail(job, f"{type(exc).__name__}: {exc}")
+            # 截断长度：服务商的错误信息可能很长，只留开头足够排查，完整内容在日志里。
+            logger.warning("investigation failed", extra={**log, "error": str(exc)})
+            await self._fail(job, f"{type(exc).__name__}: {str(exc)[:200]}")
         except Exception as exc:
+            # 意料之外的异常，它的消息可能含内部细节（路径、SQL、连接串）。
+            # 完整信息和堆栈只写日志，存进数据库、对外展示的只有异常的类型名。
             logger.exception("unexpected error while processing job", extra=log)
-            await self._fail(job, f"unexpected {type(exc).__name__}: {exc}")
+            await self._fail(job, f"unexpected {type(exc).__name__} (see server logs)")
         else:
             done = await jobs.complete(self._pool, job.id, self.worker_id, job.attempts, result_to_dict(result))
             if done is None:
@@ -154,7 +167,16 @@ class Worker:
                 logger.info("job succeeded", extra={**log, "llm_calls": result.llm_calls})
 
     async def _investigate(self, job: Job) -> InvestigationResult:
-        scenario = load_scenario(job.scenario)
+        # 只在"加载数据"这一步把这两类错误认定为"任务本身有问题"。
+        # 范围一定要窄：如果把整个调查过程里的 ValueError 都当成永久失败，
+        # 我们自己代码里的 bug 就会被误判成"数据坏了"，任务不会重试，问题还被掩盖了。
+        try:
+            scenario = load_scenario(job.scenario)
+        except FileNotFoundError:
+            raise InvalidJob("no investigation data for this ticket") from None
+        except ValueError:
+            logger.exception("scenario data is invalid", extra={"scenario": job.scenario})
+            raise InvalidJob("investigation data for this ticket is invalid") from None
         registry = build_investigation_tools(scenario)
         agent = InvestigationAgent(self._llm, registry, max_steps=self._settings.agent_max_steps)
         return await agent.investigate(job.ticket_id)

@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chat, health, investigate, sessions, webhooks
+from app.api import chat, health, investigate, jobs, sessions, webhooks
 from app.config import get_settings
 from app.db import create_pool, init_schema
 from app.llm.factory import LLMNotConfigured, create_llm_client
@@ -105,6 +105,7 @@ def create_app() -> FastAPI:
     app.include_router(investigate.router)
     app.include_router(sessions.router)
     app.include_router(webhooks.router)
+    app.include_router(jobs.router)
     return app
 
 

@@ -29,14 +29,65 @@ pre {
 }
 
 /* 页面整体：一列，头部固定在上、输入框固定在下、中间的消息区滚动。 */
+/* 整个页面：顶部导航 + 下面占满剩余高度的内容区。 */
+.shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.page {
+  flex: 1;
+  min-height: 0; /* flex 子项默认不会比内容小，需要这一行才允许内部滚动 */
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.nav-brand {
+  margin-right: 12px;
+}
+.nav-link {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 4px 2px;
+  border-bottom: 2px solid transparent;
+}
+.nav-link.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* 聊天页 */
 .app {
+  width: 100%;
   max-width: 860px;
   margin: 0 auto;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 16px;
   gap: 12px;
+}
+
+/* 其他普通页面（自动调查列表、详情） */
+.page-content {
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+.page-content h1 {
+  margin: 0 0 4px;
+  font-size: 1.35rem;
 }
 
 .topbar {
@@ -273,4 +324,79 @@ button.suggestion {
   background: var(--panel);
   color: var(--accent);
   border: 1px solid var(--border);
+}
+
+/* 自动调查：状态标签、表格、提示框 */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.status-queued {
+  background: #eef0f4;
+  color: var(--muted);
+}
+.status-running {
+  background: #dce8ff;
+  color: var(--accent);
+}
+.status-succeeded {
+  background: #d6f2e1;
+  color: var(--good);
+}
+.status-failed {
+  background: #fdecea;
+  color: var(--bad);
+}
+
+.jobs {
+  width: 100%;
+  margin-top: 16px;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.jobs th,
+.jobs td {
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.jobs th {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.jobs tr:last-child td {
+  border-bottom: none;
+}
+.jobs .cause {
+  max-width: 420px;
+}
+
+.job-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.notice {
+  margin: 12px 0;
+  padding: 10px 14px;
+  background: #eef3ff;
+  border: 1px solid #cfdcf7;
+  border-radius: 8px;
+}
+.section-title {
+  margin: 20px 0 8px;
+}
+a {
+  color: var(--accent);
 }

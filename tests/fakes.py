@@ -47,3 +47,27 @@ VALID_REPORT_ARGS = {
 def final_text(text: str = "Investigation complete, see the report.") -> LLMResponse:
     """提交报告之后，模型用文字收尾的那一次响应。"""
     return calls(text=text)
+
+
+class AutoLLM:
+    """一个"无状态"的假模型：根据对话历史的最后一条消息，决定下一步说什么。
+
+    不用预设剧本（ScriptedLLM 按顺序弹出响应），因为 Worker 测试里会有多个任务并发，
+    各自的调用顺序是交错的，按顺序弹出就乱了。这里每次只看历史就能决定，并发也安全。
+    """
+
+    def __init__(self):
+        self.calls = 0
+
+    async def generate(self, prompt, system=None):
+        raise NotImplementedError
+
+    async def generate_with_tools(self, messages, tools, system=None) -> LLMResponse:
+        self.calls += 1
+        last = messages[-1]
+        if last.role == "user":
+            return calls(ToolCall("get_ticket", {"ticket_id": "BUG-1042"}))
+        done = last.tool_results[0].name
+        if done == "get_ticket":
+            return calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS))
+        return final_text("Done.")

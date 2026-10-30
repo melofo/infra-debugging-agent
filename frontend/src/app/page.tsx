@@ -88,7 +88,7 @@ export default function Home() {
     <main className="app">
       <header className="topbar">
         <div>
-          <h1>Infra Debugging Agent</h1>
+          <h1>Chat</h1>
           <p className="subtitle">
             {session ? `Session on ${session.ticket_id} (simulated incident)` : "Ask about the simulated incident BUG-1042"}
           </p>

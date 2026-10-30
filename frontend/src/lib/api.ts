@@ -3,7 +3,7 @@
  * 这样后端地址、错误处理、SSE 解析只需要维护一处（类似 Java 里的 Service / Client 层）。
  */
 import { parseSse } from "./sse";
-import type { SessionInfo, Step, Turn } from "./types";
+import type { JobDetail, JobSummary, SessionInfo, Step, Turn } from "./types";
 
 // NEXT_PUBLIC_ 前缀的环境变量会在【构建时】被写死进发给浏览器的 JS 里，浏览器才读得到。
 // 没有这个前缀的变量只在服务端可见，浏览器里是 undefined。
@@ -84,4 +84,18 @@ export async function sendMessage(
   }
   // 流正常结束却没有收到最终结果，说明连接被中途切断了。
   if (!gotTurn) throw new ApiError(0, "connection closed before the answer was complete");
+}
+
+/** 最近的自动调查任务（列表页）。signal 用来在组件卸载时取消请求。 */
+export async function listJobs(signal?: AbortSignal): Promise<JobSummary[]> {
+  const response = await fetch(`${API_URL}/jobs`, { signal });
+  if (!response.ok) throw await toApiError(response);
+  return response.json();
+}
+
+/** 单个任务的完整详情。 */
+export async function getJob(id: string, signal?: AbortSignal): Promise<JobDetail> {
+  const response = await fetch(`${API_URL}/jobs/${encodeURIComponent(id)}`, { signal });
+  if (!response.ok) throw await toApiError(response);
+  return response.json();
 }

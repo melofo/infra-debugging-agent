@@ -16,31 +16,7 @@ from app.config import Settings
 from app.llm.base import LLMError, LLMResponse, ToolCall
 from app.main import app
 from app.worker import Worker
-from tests.fakes import SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, calls, final_text
-
-
-class AutoLLM:
-    """一个"无状态"的假模型：根据对话历史的最后一条消息，决定下一步说什么。
-
-    不用预设剧本（ScriptedLLM 按顺序弹出响应），因为 Worker 测试里会有多个任务并发，
-    各自的调用顺序是交错的，按顺序弹出就乱了。这里每次只看历史就能决定，并发也安全。
-    """
-
-    def __init__(self):
-        self.calls = 0
-
-    async def generate(self, prompt, system=None):
-        raise NotImplementedError
-
-    async def generate_with_tools(self, messages, tools, system=None) -> LLMResponse:
-        self.calls += 1
-        last = messages[-1]
-        if last.role == "user":
-            return calls(ToolCall("get_ticket", {"ticket_id": "BUG-1042"}))
-        done = last.tool_results[0].name
-        if done == "get_ticket":
-            return calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS))
-        return final_text("Done.")
+from tests.fakes import SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, AutoLLM, calls, final_text
 
 
 class FailingLLM:
@@ -163,7 +139,9 @@ async def test_a_job_with_missing_data_fails_immediately_without_retries(pool):
     [job] = await jobs.list_jobs(pool)
     # 数据不存在，重试一百次也一样：第 1 次就直接最终失败，剩下的重试次数和模型费用都省下了。
     assert (job.status, job.attempts) == ("failed", 1)
-    assert "invalid job" in job.last_error
+    assert job.last_error == "invalid job: no investigation data for this ticket"
+    # 回归测试：错误信息会通过 API 对外展示，不能泄露服务器上的文件路径。
+    assert "/" not in job.last_error and "scenarios" not in job.last_error
 
 
 async def test_an_unexpected_exception_is_recorded_and_retried_not_fatal(pool):
@@ -174,6 +152,8 @@ async def test_an_unexpected_exception_is_recorded_and_retried_not_fatal(pool):
 
     [job] = await jobs.list_jobs(pool)
     assert job.status == "queued" and "RuntimeError" in job.last_error
+    # 意外异常的消息可能含内部细节，对外只显示异常类型，详情只在日志里。
+    assert "a bug in our code" not in job.last_error
 
 
 async def test_a_hanging_investigation_times_out_and_is_retried(pool):
@@ -378,3 +358,29 @@ async def test_shutdown_releases_a_job_that_is_still_running(pool, monkeypatch):
     # 关闭超过了宽限期：worker 被取消，任务被放回队列，没有留下"执行中"的僵尸任务。
     [job] = await jobs.list_jobs(pool)
     assert (job.status, job.attempts) == ("queued", 0)
+
+
+async def test_a_value_error_deep_inside_the_agent_is_retried_not_treated_as_bad_data(pool):
+    # 回归测试：以前把任何 ValueError 都当成"数据坏了"而永久失败。
+    # 这会把我们自己代码里的 bug 误判成数据问题，既不重试，也掩盖了真正的原因。
+    await jobs.enqueue(pool, "evt-1", "BUG-1042", "bug-1042")
+    worker = Worker(pool, FailingLLM(ValueError("bug inside the agent")), make_settings(), worker_id="w1")
+
+    await worker.run_once()
+
+    [job] = await jobs.list_jobs(pool)
+    assert job.status == "queued"  # 会重试，而不是永久失败
+
+
+async def test_corrupt_scenario_data_fails_permanently_with_a_safe_message(pool, tmp_path, monkeypatch):
+    broken = tmp_path / "broken-data.json"
+    broken.write_text("{ this is not valid json")
+    monkeypatch.setattr("app.scenario.SCENARIO_DIR", tmp_path)
+    await jobs.enqueue(pool, "evt-1", "BUG-1", "broken-data")
+
+    await Worker(pool, AutoLLM(), make_settings(), worker_id="w1").run_once()
+
+    [job] = await jobs.list_jobs(pool)
+    assert job.status == "failed"
+    assert job.last_error == "invalid job: investigation data for this ticket is invalid"
+    assert str(tmp_path) not in job.last_error

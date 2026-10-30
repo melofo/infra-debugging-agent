@@ -87,6 +87,12 @@ Database integration tests use a separate `agent_test` database, refuse to run a
 
 A worker runs inside the API process (started in the app lifespan) and executes queued jobs with the same investigation agent the chat uses, storing the report in the job's `result`. It processes one job at a time (model rate limits), retries transient failures with exponential backoff, fails permanently on bad data, enforces a per-job timeout, reclaims jobs whose worker disappeared, and on shutdown releases its current job back to the queue without using an attempt. Several instances can run side by side safely (`FOR UPDATE SKIP LOCKED`). It only starts when the LLM is configured; set `WORKER_ENABLED=false` to disable it. Tests disable it by default so they can never spend real model quota.
 
+## Automatic investigations (results)
+
+- `GET /jobs` – recent jobs with a preview (status, attempts, most likely cause and confidence); `GET /jobs/{id}` – full detail including the RCA report and the agent's steps.
+- The UI has an "Automatic investigations" page (`/jobs`, polling every 3 seconds) and a detail page (`/jobs/<id>`) that stops polling once the job is finished.
+- Error messages stored on jobs are user-facing: they never contain server paths or internal exception text (details go to the server log only).
+
 ## Chat UI
 
 A Next.js front end lives in `frontend/` (see `frontend/README.md`). With the backend running:
@@ -99,6 +105,6 @@ The backend allows browser calls from `http://localhost:3000` by default (CORS a
 
 ## Known limitations
 
-- No authentication or rate limiting yet: run it locally only.
+- No authentication or rate limiting yet (including on `/jobs`, which exposes investigation results): run it locally only.
 - Data sources are simulated JSON files; real Jira / log / Git connectors are planned.
 - Free-tier Gemini quotas (about 5 requests/minute) can throttle multi-step investigations.

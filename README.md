@@ -61,6 +61,32 @@ Run the tests (no API key needed):
 pytest
 ```
 
+## Database
+
+PostgreSQL (with the pgvector extension, used later for runbook retrieval) runs in Docker. It stores the investigation job queue used by the Jira webhook flow.
+
+```bash
+docker compose up -d db      # start (127.0.0.1:5432 only)
+docker compose down          # stop; add -v to also delete the data
+```
+
+The app creates its tables at startup (`app/schema.sql`, idempotent) and still starts if the database is down: chat and investigations keep working, `GET /ready` reports 503, and job features are unavailable. `GET /health` is a liveness check and deliberately does not touch the database. Override the connection with `DATABASE_URL`; the default is a local, dev-only credential.
+
+Database integration tests use a separate `agent_test` database, refuse to run against a non-local host, and are skipped automatically when PostgreSQL is not running.
+
+## Jira webhook
+
+`POST /webhooks/jira` receives Jira Cloud "issue created" events for Bugs and queues an investigation job (the job worker is added in a later step). It follows Jira's documented behaviour: the body is signed with HMAC-SHA256 (`X-Hub-Signature: sha256=<hex>`) and `X-Atlassian-Webhook-Identifier` identifies a delivery across retries.
+
+- Set `JIRA_WEBHOOK_SECRET` to the secret configured on the Jira webhook. Without it the endpoint refuses everything (fail closed).
+- The signature is verified over the raw body with a constant-time comparison before anything else is parsed or stored.
+- Redelivered events are deduplicated; unrelated events are acknowledged with `200` and ignored.
+- Status codes are chosen for Jira's retry rules: `202` queued, `200` duplicate/ignored, `401` bad signature, `400` malformed, `413` too large, `503` database unavailable (Jira retries those).
+
+## Background worker
+
+A worker runs inside the API process (started in the app lifespan) and executes queued jobs with the same investigation agent the chat uses, storing the report in the job's `result`. It processes one job at a time (model rate limits), retries transient failures with exponential backoff, fails permanently on bad data, enforces a per-job timeout, reclaims jobs whose worker disappeared, and on shutdown releases its current job back to the queue without using an attempt. Several instances can run side by side safely (`FOR UPDATE SKIP LOCKED`). It only starts when the LLM is configured; set `WORKER_ENABLED=false` to disable it. Tests disable it by default so they can never spend real model quota.
+
 ## Chat UI
 
 A Next.js front end lives in `frontend/` (see `frontend/README.md`). With the backend running:

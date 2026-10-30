@@ -72,3 +72,8 @@ def load_scenario(name: str) -> Scenario:
     # 数据文件写错了（缺字段、时间格式不对）会在加载时立刻报错，而不是调查到一半才崩。
     path = SCENARIO_DIR / f"{name}.json"
     return Scenario.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def scenario_exists(name: str) -> bool:
+    """名字合法并且对应的场景文件存在。"""
+    return bool(SCENARIO_NAME_PATTERN.fullmatch(name)) and (SCENARIO_DIR / f"{name}.json").is_file()

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.llm.base import LLMClient, LLMError
-from app.llm.gemini import GeminiClient
+from app.llm.factory import LLMNotConfigured, create_llm_client
 
 router = APIRouter()
 # 每个模块用 __name__ 创建自己的 logger（Java 里的 LoggerFactory.getLogger(Foo.class)）。
@@ -41,16 +41,11 @@ class ChatResponse(BaseModel):
 # lru_cache 让 GeminiClient 只创建一次、之后复用（单例），避免每个请求都重新建立客户端。
 @lru_cache
 def get_llm_client() -> LLMClient:
-    settings = get_settings()
-    if not settings.gemini_api_key or not settings.gemini_model:
+    try:
+        return create_llm_client(get_settings())
+    except LLMNotConfigured:
         # 503 = 服务暂时不可用。这里表示"服务端还没配置好"，而不是调用方的错。
         raise HTTPException(status_code=503, detail="LLM is not configured")
-    return GeminiClient(
-        api_key=settings.gemini_api_key,
-        model=settings.gemini_model,
-        timeout_seconds=settings.llm_timeout_seconds,
-        max_attempts=settings.llm_max_attempts,
-    )
 
 
 @router.post("/chat", response_model=ChatResponse)

@@ -1,0 +1,30 @@
+# 本地开发用的 PostgreSQL。启动：docker compose up -d db    停止：docker compose down
+#
+# Docker Compose 用一个 YAML 文件描述"需要哪些容器、怎么配置"，一条命令全部拉起。
+# 可以类比 Java 项目里用 Testcontainers，或者本地手动装一个数据库，但可重复、不污染系统。
+services:
+  db:
+    # 这个镜像是 PostgreSQL 加上 pgvector 扩展。现在用不到向量功能，
+    # 但 Phase 5（检索 runbook 和历史事故）要用，先选好，免得以后换镜像、迁移数据。
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: agent
+      # 仅限本地开发的密码，数据库只绑定在本机回环地址（见下面的 ports），外部连不上。
+      # 生产环境的密码绝不写进文件，会放进 Secret Manager（Phase 8）。
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: agent
+    ports:
+      # 前面的 127.0.0.1 很重要：只允许本机访问。写成 "5432:5432" 会暴露给局域网里的所有设备。
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # 数据存在 Docker 的"命名卷"里：容器删除重建，数据还在（docker compose down -v 才会清掉）。
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # 健康检查：让 Docker 知道数据库是否真的可以接受连接了（容器启动不等于数据库就绪）。
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:

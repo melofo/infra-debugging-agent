@@ -67,7 +67,7 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 # ---------------------------------------------------------------------------
 # 离线向量化器
 # ---------------------------------------------------------------------------
-_STOPWORDS = frozenset("a an and are as at be by for from in is it of on or that the this to was were with".split())
+STOPWORDS = frozenset("a an and are as at be by for from in is it of on or that the this to was were with".split())
 
 
 class HashEmbedder:
@@ -84,7 +84,7 @@ class HashEmbedder:
         return f"hash:{self._dimensions}"
 
     def _embed(self, text: str) -> list[float]:
-        words = [w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in _STOPWORDS]
+        words = [w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in STOPWORDS]
         if not words:
             raise ValueError("cannot embed text without any words")
         # 单词 + 相邻词对：词对保留一点点词序信息（"pool size" 比单独的 "pool" 和 "size" 更有区分度）。

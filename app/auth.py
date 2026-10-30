@@ -159,43 +159,63 @@ async def authenticate_key(pool: AsyncConnectionPool, presented: str) -> Princip
     return Principal(key_id=key_id, name=name, role=role)
 
 
-def _bearer_token(request: Request) -> str | None:
-    header = request.headers.get("authorization", "")
-    scheme, _, token = header.partition(" ")
+def bearer_token(authorization: str | None) -> str | None:
+    scheme, _, token = (authorization or "").partition(" ")
     # 只接受 Authorization 请求头里的 Bearer 令牌（方案名按规范不区分大小写）。
     # 故意不支持 URL 里的 ?api_key=...：URL 会被写进反向代理、浏览器历史、访问日志，等于把密钥贴在了公告栏上。
     return token.strip() if scheme.lower() == "bearer" and token.strip() else None
 
 
-def _unauthorized() -> HTTPException:
+class AuthFailure(Exception):
+    """认证失败。和具体的 Web 框架无关：REST 接口把它转成 HTTPException，MCP 的 ASGI 中间件把它转成 JSON 响应。
+
+    把校验逻辑只写在一处（authenticate_request），两个入口共用，规则就不会各改各的、慢慢走样。
+    """
+
+    def __init__(self, status: int, detail: str, headers: dict[str, str] | None = None):
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
+        self.headers = headers or {}
+
+
+def _unauthorized() -> AuthFailure:
     # 所有失败原因（缺失、格式不对、不存在、已吊销、已过期）返回完全一样的响应：
     # 不告诉攻击者"这把钥匙存在，只是被吊销了"。
-    return HTTPException(
-        status_code=401, detail="invalid or missing API key", headers={"WWW-Authenticate": "Bearer"}
-    )
+    return AuthFailure(401, "invalid or missing API key", {"WWW-Authenticate": "Bearer"})
 
 
-async def current_principal(request: Request) -> Principal:
-    if not get_settings().auth_required:
-        return DEV_PRINCIPAL
-
-    token = _bearer_token(request)
+async def authenticate_request(pool: AsyncConnectionPool | None, authorization: str | None) -> Principal:
+    """从 Authorization 请求头的值得到调用者身份；失败抛 AuthFailure。"""
+    token = bearer_token(authorization)
     if token is None:
         raise _unauthorized()
-
-    pool = getattr(request.app.state, "pool", None)
     if pool is None:
-        raise HTTPException(status_code=503, detail="authentication is temporarily unavailable")
+        raise AuthFailure(503, "authentication is temporarily unavailable")
     try:
         principal = await authenticate_key(pool, token)
     except psycopg.OperationalError:
         # 数据库不可用时【拒绝】，而不是放行："fail closed"。代价是数据库挂了的时候受保护的接口也不可用，这是安全优先的取舍。
         logger.exception("authentication lookup failed")
-        raise HTTPException(status_code=503, detail="authentication is temporarily unavailable")
+        raise AuthFailure(503, "authentication is temporarily unavailable") from None
     if principal is None:
         logger.warning("rejected an API key")  # 不记录密钥本身
         raise _unauthorized()
     return principal
+
+
+FORBIDDEN_DETAIL = "this API key is not allowed to do that"
+
+
+async def current_principal(request: Request) -> Principal:
+    if not get_settings().auth_required:
+        return DEV_PRINCIPAL
+    try:
+        return await authenticate_request(
+            getattr(request.app.state, "pool", None), request.headers.get("authorization")
+        )
+    except AuthFailure as failure:
+        raise HTTPException(status_code=failure.status, detail=failure.detail, headers=failure.headers or None)
 
 
 def require_scope(scope: str):
@@ -204,7 +224,7 @@ def require_scope(scope: str):
     async def dependency(principal: Principal = Depends(current_principal)) -> Principal:
         if not principal.has(scope):
             logger.warning("forbidden", extra={"actor": principal.name, "scope": scope})
-            raise HTTPException(status_code=403, detail="this API key is not allowed to do that")
+            raise HTTPException(status_code=403, detail=FORBIDDEN_DETAIL)
         return principal
 
     return dependency

@@ -20,7 +20,7 @@ from app.llm.base import LLMError, LLMResponse
 from app.main import app
 from app.scenario import load_scenario
 from app.sessions import SessionStore, get_session_store
-from tests.fakes import SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls, final_text
+from tests.fakes import GET_TICKET, SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls, final_text
 
 
 @pytest.fixture
@@ -192,7 +192,7 @@ async def test_concurrent_messages_to_one_session_get_409(store):
             await release.wait()  # 卡住，直到测试放行，模拟"模型还在思考"
             return await super().generate_with_tools(messages, tools, system)
 
-    use_llm(SlowLLM([calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)), final_text()]))
+    use_llm(SlowLLM([calls(GET_TICKET, ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)), final_text()]))
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         session_id = (await client.post("/sessions", json={})).json()["id"]
@@ -223,6 +223,7 @@ async def test_history_stays_valid_when_report_is_submitted_with_other_calls():
     llm = ScriptedLLM(
         [
             calls(
+                GET_TICKET,  # 同一批次里先查到的数据，可以被紧随其后的报告引用
                 ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS),
                 ToolCall("get_ticket", {"ticket_id": "BUG-1042"}),  # 同一圈里报告之后的只读调用照常执行
                 ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS),  # 重复提交
@@ -237,8 +238,8 @@ async def test_history_stays_valid_when_report_is_submitted_with_other_calls():
     assert result.answer == "done"
     assert_history_is_valid(messages)
     assert messages[-1].role == "model"  # 以模型的文字结尾，保证下一条用户消息能正确衔接
-    accepted, ticket, duplicate = messages[-2].tool_results
-    assert not accepted.is_error and not ticket.is_error
+    first_ticket, accepted, ticket, duplicate = messages[-2].tool_results
+    assert not first_ticket.is_error and not accepted.is_error and not ticket.is_error
     assert duplicate.is_error and "skipped" in duplicate.result  # 重复提交只认第一份，但历史里仍有对应结果
 
 
@@ -251,7 +252,7 @@ async def test_report_is_kept_when_final_text_call_fails():
                 raise LLMError("provider down")
             return await super().generate_with_tools(messages, tools, system)
 
-    llm = FailsOnFinalCall([calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS))])
+    llm = FailsOnFinalCall([calls(GET_TICKET, ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS))])
     messages = []
     result = await InvestigationAgent(llm, registry).run_turn(messages, "go", "BUG-1042", require_report=True)
 
@@ -264,7 +265,7 @@ async def test_report_is_kept_when_final_text_call_fails():
 
 async def test_report_is_kept_when_submitted_on_the_last_allowed_step():
     registry = build_investigation_tools(load_scenario("bug-1042"))
-    llm = ScriptedLLM([calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS))])
+    llm = ScriptedLLM([calls(GET_TICKET, ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS))])
     messages = []
     # max_steps=1：提交报告用掉了唯一的一圈，没有余量再让模型文字收尾。
     result = await InvestigationAgent(llm, registry, max_steps=1).run_turn(

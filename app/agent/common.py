@@ -30,9 +30,12 @@ text. Reuse data you already gathered earlier in the conversation; call tools on
 data. Only call submit_rca_report again if the engineer asks you to revise the report.
 
 Rules:
-- Every hypothesis must cite concrete evidence from tool results. The reference must be exactly \
-verifiable by a human: a commit sha, the exact log message, a runbook id or a ticket id. \
-Never use a tool name as a reference.
+- Every hypothesis must cite concrete evidence from tool results. Each reference is checked by code \
+and the report is rejected if it is not found: copy it verbatim from data a tool returned in this \
+conversation. Use the ticket id (jira, from get_ticket), the exact log message text (log, from \
+search_logs), the commit sha (git, from get_recent_deploys), or the document id such as RB-101 or \
+INC-2031 (runbook or incident, from the knowledge or runbook search). Never use a tool name, a \
+paraphrase, or a time of day as a reference. Do not cite metric or trace evidence: you have no tool for it.
 - If the engineer asked a specific question, the report summary must answer it directly.
 - Runbooks and past incidents are guidance, not proof. A similar past incident on another service tells \
 you where to look; only this incident's own logs, deploys and ticket can support a conclusion. Cite them \

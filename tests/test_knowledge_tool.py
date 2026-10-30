@@ -26,7 +26,7 @@ from app.rag.runtime import active_knowledge_base
 from app.scenario import load_scenario
 from app.sessions import SessionStore, get_session_store
 from app.worker import Worker
-from tests.fakes import VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls, final_text
+from tests.fakes import GET_TICKET, VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls, final_text
 
 
 @pytest.fixture
@@ -190,7 +190,7 @@ async def test_the_agent_can_search_the_knowledge_base_and_cite_a_past_incident(
                 "root_cause": "maximumPoolSize reduced",
                 "confidence": 0.9,
                 "evidence": [
-                    {"source": "git", "summary": "pool 50 -> 5", "reference": "commit 7be41d0"},
+                    {"source": "git", "summary": "pool 50 -> 5", "reference": "7be41d0"},
                     {"source": "incident", "summary": "Same pattern as a past incident", "reference": "INC-2031"},
                 ],
             }
@@ -199,6 +199,8 @@ async def test_the_agent_can_search_the_knowledge_base_and_cite_a_past_incident(
     llm = ScriptedLLM(
         [
             calls(ToolCall("search_knowledge", {"query": POOL_QUERY})),
+            # 证据要引用发布记录里的 commit：先查过 get_recent_deploys，才通过证据落地检查。
+            calls(ToolCall("get_recent_deploys", {"service": "checkout-api"})),
             calls(ToolCall(SUBMIT_TOOL_NAME, report_args)),
             final_text(),
         ]
@@ -206,7 +208,7 @@ async def test_the_agent_can_search_the_knowledge_base_and_cite_a_past_incident(
 
     result = await InvestigationAgent(llm, registry).investigate("BUG-1042")
 
-    assert [s.tool for s in result.steps] == ["search_knowledge", SUBMIT_TOOL_NAME]
+    assert [s.tool for s in result.steps] == ["search_knowledge", "get_recent_deploys", SUBMIT_TOOL_NAME]
     assert result.steps[0].ok
     assert result.report.hypotheses[0].evidence[1].source == "incident"
     # 第二次调用模型时，检索结果已经在对话历史里了。
@@ -219,7 +221,7 @@ async def test_a_failed_knowledge_search_does_not_stop_the_investigation(scenari
     llm = ScriptedLLM(
         [
             calls(ToolCall("search_knowledge", {"query": "pool problem"})),
-            calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
+            calls(GET_TICKET, ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
             final_text(),
         ]
     )
@@ -270,7 +272,7 @@ class ToolRecordingLLM:
         self.tool_names = [t.name for t in tools]
         last = messages[-1]
         if last.role == "user":
-            return calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS))
+            return calls(GET_TICKET, ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS))
         return final_text()
 
 

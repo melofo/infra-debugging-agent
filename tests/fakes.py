@@ -28,20 +28,43 @@ def calls(*tool_calls: ToolCall, text: str = "") -> LLMResponse:
     return LLMResponse(text=text, input_tokens=10, output_tokens=5, latency_ms=1, tool_calls=tuple(tool_calls))
 
 
-VALID_REPORT_ARGS = {
-    "summary": "Deploy 2.14.0 shrank the DB pool.",
-    "hypotheses": [
-        {
-            "root_cause": "maximumPoolSize reduced from 50 to 5 in 2.14.0",
-            "confidence": 0.9,
-            "evidence": [
-                {"source": "git", "summary": "pool size 50 -> 5", "reference": "commit 7be41d0"},
-                {"source": "log", "summary": "Hikari connection not available", "reference": "checkout-api ERROR 14:02"},
-            ],
-            "suggested_next_steps": ["Roll back the pool size change"],
-        }
-    ],
+# 测试里的报告也必须通过【证据落地检查】（见 app/agent/grounding.py）：证据的出处要能在工具返回的数据里找到原文。
+# 所以假模型必须先调用对应的工具，再引用工具真正返回的内容；不能再随手编一个 "commit 7be41d0"。
+#
+# VALID_REPORT_ARGS 只引用工单（来自 get_ticket）：最短的调查流程（只查工单就提交）也能用它。
+JIRA_EVIDENCE = {
+    "source": "jira",
+    "summary": "Ticket reports intermittent HTTP 500s at checkout since about 14:00 UTC",
+    "reference": "BUG-1042",
 }
+GIT_EVIDENCE = {"source": "git", "summary": "pool size 50 -> 5", "reference": "7be41d0"}
+LOG_EVIDENCE = {
+    "source": "log",
+    "summary": "Hikari cannot hand out connections",
+    "reference": "HikariPool-1 - Connection is not available, request timed out after 30000ms",
+}
+
+
+GET_TICKET = ToolCall("get_ticket", {"ticket_id": "BUG-1042"})  # 只要先成功查过工单，就能引用工单作为证据
+
+
+def report_args(*evidence: dict) -> dict:
+    return {
+        "summary": "Deploy 2.14.0 shrank the DB pool.",
+        "hypotheses": [
+            {
+                "root_cause": "maximumPoolSize reduced from 50 to 5 in 2.14.0",
+                "confidence": 0.9,
+                "evidence": list(evidence),
+                "suggested_next_steps": ["Roll back the pool size change"],
+            }
+        ],
+    }
+
+
+VALID_REPORT_ARGS = report_args(JIRA_EVIDENCE)
+# 引用了日志和发布记录：提交前必须已经成功调用过 search_logs 和 get_recent_deploys。
+RICH_REPORT_ARGS = report_args(JIRA_EVIDENCE, GIT_EVIDENCE, LOG_EVIDENCE)
 
 
 def final_text(text: str = "Investigation complete, see the report.") -> LLMResponse:

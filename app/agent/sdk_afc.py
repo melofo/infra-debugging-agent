@@ -23,6 +23,7 @@ from app.agent.common import (
     build_report,
     preview,
 )
+from app.agent.grounding import GroundingCorpus, rejection_message
 from app.agent.tools import ToolError, ToolRegistry
 from app.llm.gemini import GeminiClient
 
@@ -37,11 +38,13 @@ class SdkAfcAgent:
         start = time.perf_counter()
         steps: list[StepRecord] = []
         submitted: list[SubmitRCAArgs] = []  # 用列表当"可修改的盒子"，让下面的函数能把结果存出来
+        corpus = GroundingCorpus()  # 记下每次成功的工具返回，提交报告时核对证据（见 grounding.py）
 
         async def run(tool: str, args: dict) -> dict:
             """所有工具函数共用：走同一个注册表，保留白名单和参数校验，并记录步骤。"""
             try:
                 output = await self._registry.execute(tool, args)
+                corpus.add(tool, output)
                 steps.append(StepRecord(len(steps) + 1, tool, args, True, preview(output)))
                 # SDK 要求工具返回值能放进 JSON 对象，所以列表要包一层。
                 return output if isinstance(output, dict) else {"result": output}
@@ -117,6 +120,11 @@ class SdkAfcAgent:
             except ValidationError as exc:
                 steps.append(StepRecord(len(steps) + 1, SUBMIT_TOOL_NAME, {}, False, "invalid report"))
                 return {"error": f"invalid report: {exc.errors(include_url=False)}"}
+            if problems := corpus.check(submitted[-1]):
+                submitted.pop()  # 没通过核对的报告不算数；模型会收到原因，可以改完再提交
+                message = rejection_message(problems)
+                steps.append(StepRecord(len(steps) + 1, SUBMIT_TOOL_NAME, {}, False, preview(message)))
+                return {"error": message}
             steps.append(StepRecord(len(steps) + 1, SUBMIT_TOOL_NAME, {}, True, "report submitted"))
             return {"status": "accepted"}
 

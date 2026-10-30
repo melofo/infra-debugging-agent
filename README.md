@@ -115,11 +115,27 @@ Then open http://localhost:3000/jobs to watch the job go Queued, Running, Done. 
 
 `scripts/eval_retrieval.py` compares retrieval strategies (random floor, BM25 keyword search, vector search over whole documents / chunks of 1000 / chunks of 400, hybrid BM25 + vector with rank fusion) on 35 labeled queries (`data/eval/retrieval_queries.json`) and reports hit@k, recall@k and MRR, overall and per query category. It runs in memory (no database); a test checks that its ranking matches the database search. The `disjoint` category contains questions that deliberately share almost no words with their answers, enforced by a test. Use `--embedder hash` for an offline plumbing check (its numbers say nothing about semantic quality) and the default Gemini embedder for real results.
 
+## Evidence grounding
+
+A report is only accepted if every piece of evidence can be traced to data the tools actually returned (`app/agent/grounding.py`). The model is told to copy each `reference` verbatim; the code then checks it:
+
+- it must appear (ignoring case and extra whitespace) inside one string returned by a **successful** tool call in this conversation, not in what the user or the model said, and not stitched across fields;
+- the evidence type decides which tools may supply it: `jira` from `get_ticket`, `log` from `search_logs`, `git` from `get_recent_deploys`, `runbook` from the runbook/knowledge search, `incident` from `search_knowledge`. `metric` and `trace` have no tool, so they are always rejected;
+- references must not be trivially short (log references need 20+ characters).
+
+A rejected report goes back to the model with the exact evidence that failed; after two rejections in one turn the turn fails (and is rolled back) rather than delivering an untraceable conclusion. Both the hand-written loop and the SDK variant enforce it, and it works the same through MCP. What it cannot catch: a real quote used to support a wrong conclusion. That is measured by the end-to-end evaluation, not by this check.
+
 ## MCP server
 
 The investigation tools (ticket, logs, deployments, runbook/knowledge search) are also exposed as a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, so any MCP host can use them: `scripts/mcp_server.py` (`--knowledge` adds semantic search). All tools are declared read-only and share their definitions, argument validation and limits with the agent's own tool registry; the agent's `submit_rca_report` action is deliberately not exposed. Connect it to Claude Code with `claude mcp add infra-debugging -- <project>/.venv/bin/python <project>/scripts/mcp_server.py`.
 
-The agent can also consume its tools **through** MCP (`TOOL_SOURCE=direct|mcp-memory|mcp-stdio`, a server-side setting: a request cannot choose it). The MCP client treats the server as untrusted: tool allowlist, read-only requirement, truncated descriptions, schema/result/time limits. `scripts/compare_tool_transports.py` measures what each layer costs.
+The agent can also consume its tools **through** MCP (`TOOL_SOURCE=direct|mcp-memory|mcp-stdio|mcp-http`, a server-side setting: a request cannot choose it). The MCP client treats the server as untrusted: tool allowlist, read-only requirement, truncated descriptions, schema/result/time limits. `scripts/compare_tool_transports.py` measures what each layer costs.
+
+### MCP over HTTP
+
+`scripts/mcp_server.py --transport http` serves the same tools over Streamable HTTP at `127.0.0.1:8765/mcp`. Unlike stdio (where being able to launch the process is the authorization), a network port needs real authentication: every request must carry `Authorization: Bearer agk_...`, checked by the same code as the REST API (`app/auth.py`) and requiring the `investigate:run` scope. It is stateless (any instance can serve any request), caps request bodies at 64 KB, validates Host headers against DNS rebinding, refuses to start without a database, and refuses non-local binds unless `--allowed-host` is given. Put TLS in front before exposing it.
+
+To make the agent use a remote server: `TOOL_SOURCE=mcp-http`, `MCP_HTTP_URL=https://...`, `MCP_API_KEY=agk_...` (a dedicated least-privilege key). Settings refuse plain `http` to non-local hosts, since the key would travel in the clear, and the key is masked when settings are printed.
 
 ## API authentication
 

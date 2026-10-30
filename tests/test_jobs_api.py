@@ -94,7 +94,7 @@ async def test_detail_of_a_succeeded_job_includes_the_full_report_and_steps(clie
     assert body["status"] == "succeeded" and body["scenario"] == "bug-1042"
     result = body["result"]
     assert result["report"]["incident_id"] == "BUG-1042"
-    assert result["report"]["hypotheses"][0]["evidence"][0]["source"] == "git"
+    assert result["report"]["hypotheses"][0]["evidence"][0]["source"] == "jira"
     assert [s["tool"] for s in result["steps"]] == ["get_ticket", "submit_rca_report"]
     assert result["llm_calls"] == 3 and result["input_tokens"] > 0
 

@@ -29,7 +29,7 @@ from app.mcp_server import build_mcp_server
 from app.scenario import load_scenario
 from app.tool_sources import open_tools, stdio_parameters
 from app.worker import Worker
-from tests.fakes import SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, AutoLLM, ScriptedLLM, ToolCall, calls, final_text
+from tests.fakes import GET_TICKET, SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, AutoLLM, ScriptedLLM, ToolCall, calls, final_text
 
 READ_ONLY = types.ToolAnnotations(read_only_hint=True)
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "mcp_server.py"
@@ -273,7 +273,7 @@ def test_the_tool_source_cannot_be_chosen_by_the_request(monkeypatch):
 
     monkeypatch.setattr("app.tool_sources.stdio_parameters", never)
     app.dependency_overrides[get_llm_client] = lambda: ScriptedLLM(
-        [calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)), final_text()]
+        [calls(GET_TICKET, ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)), final_text()]
     )
     try:
         response = TestClient(app).post("/investigate", json={"tool_source": "mcp-stdio", "tools": "mcp-stdio"})

@@ -54,6 +54,7 @@ async def test_sdk_agent_tool_errors_are_returned_not_raised(registry):
     async def script(tools):
         # 拼错的服务名：工具应返回 {"error": ...}（SDK 会把它交还给模型），而不是抛异常。
         outputs["bad"] = await tools["search_logs"](service="payment-service")
+        await tools["get_ticket"](ticket_id="BUG-1042")
         await tools["submit_rca_report"](**VALID_REPORT_ARGS)
 
     result = await SdkAfcAgent(FakeAfcGemini(script), registry).investigate("BUG-1042")
@@ -75,6 +76,7 @@ async def test_sdk_agent_rejects_report_without_evidence(registry):
 
 def test_sdk_mode_works_through_the_api():
     async def script(tools):
+        await tools["get_ticket"](ticket_id="BUG-1042")
         await tools["submit_rca_report"](**VALID_REPORT_ARGS)
 
     app.dependency_overrides[get_llm_client] = lambda: FakeAfcGemini(script)

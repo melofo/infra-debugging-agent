@@ -21,7 +21,7 @@ from app.llm.base import LLMError
 from app.main import app
 from app.scenario import load_scenario
 from app.sessions import SessionStore, get_session_store
-from tests.fakes import SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls, final_text
+from tests.fakes import GET_TICKET, SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls, final_text
 
 
 def parse_sse(text: str) -> list[tuple[str, dict]]:
@@ -125,7 +125,7 @@ async def test_stream_to_busy_session_returns_409(store):
             await release.wait()
             return await super().generate_with_tools(messages, tools, system)
 
-    use_llm(Slow([calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)), final_text()]))
+    use_llm(Slow([calls(GET_TICKET, ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)), final_text()]))
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         session_id = (await client.post("/sessions", json={})).json()["id"]

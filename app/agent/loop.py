@@ -34,10 +34,15 @@ from app.agent.common import (
     preview,
     submit_spec,
 )
+from app.agent.grounding import GroundingCorpus, rejection_message
 from app.agent.tools import ToolError, ToolRegistry
 from app.llm.base import LLMClient, LLMError, Message, ToolResult
 
 logger = logging.getLogger(__name__)
+
+# 同一轮里，报告因为"证据对不上工具返回的数据"被拒绝几次之后就放弃。
+# 模型改一两次通常就能改对；一直改不对，说明它在编造，继续重试只是烧钱。
+MAX_GROUNDING_REJECTIONS = 2
 
 # 回调的类型：接收一个 StepRecord、返回协程（可以 await）的函数。类似 Java 的 Function 接口。
 StepCallback = Callable[[StepRecord], Awaitable[None]]
@@ -125,6 +130,7 @@ class InvestigationAgent:
                 latency_ms=int((time.perf_counter() - start) * 1000),
             )
 
+        grounding_rejections = 0
         submitted = None  # 这一轮里成功提交的报告（可能在某一圈提交，之后还有一圈让模型做文字收尾）
 
         def finish_with_report() -> InvestigationResult:
@@ -182,6 +188,19 @@ class InvestigationAgent:
                     except ValidationError as exc:
                         # 报告不合格（例如假设没有证据）：把原因告诉模型，让它重写，而不是崩溃。
                         message = f"invalid report: {exc.errors(include_url=False)}"
+                        tool_results.append(ToolResult(call.name, message, is_error=True))
+                        await add_step(StepRecord(step, call.name, call.args, False, preview(message)))
+                        continue
+                    # 证据落地检查：每条证据的出处必须能在工具返回的数据里找到原文（见 grounding.py）。
+                    # 检查的数据范围 = 整个会话历史里的工具结果 + 本批次里已经跑完的（追问时修订报告可以引用之前查到的数据）。
+                    problems = GroundingCorpus.from_messages(messages, extra=tuple(tool_results)).check(args)
+                    if problems:
+                        grounding_rejections += 1
+                        logger.warning("report rejected: unverifiable evidence", extra={"problems": len(problems)})
+                        if grounding_rejections > MAX_GROUNDING_REJECTIONS:
+                            # 反复提交无法核对的证据：宁可没有报告，也不交付无法追溯的结论。
+                            raise AgentError("the report kept citing evidence that no tool returned")
+                        message = rejection_message(problems)
                         tool_results.append(ToolResult(call.name, message, is_error=True))
                         await add_step(StepRecord(step, call.name, call.args, False, preview(message)))
                         continue

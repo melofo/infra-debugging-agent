@@ -30,9 +30,12 @@ from typing import Any
 
 import mcp_types as types
 from mcp import Client
+from mcp.client.streamable_http import streamable_http_client
+from mcp.shared._httpx_utils import create_mcp_http_client
 from mcp.shared.exceptions import MCPError
 
 from app.agent.common import AgentError
+from app.config import ensure_safe_mcp_endpoint
 from app.agent.tools import ToolError
 from app.llm.base import ToolSpec
 
@@ -146,6 +149,19 @@ async def _load_specs(
         if cursor is None:
             break
     return specs
+
+
+@asynccontextmanager
+async def bearer_http_transport(url: str, api_key: str):
+    """通过 Streamable HTTP 连远程 MCP 服务端，每个请求都带上 Authorization: Bearer。
+
+    密钥只放在请求头里，不放 URL（URL 会进日志）；不是 https 又不是本机时拒绝发送（见 ensure_safe_mcp_endpoint）。
+    返回的对象可以直接作为 connect_mcp 的 target（SDK 把它当作 Transport）。
+    """
+    ensure_safe_mcp_endpoint(url)
+    async with create_mcp_http_client(headers={"Authorization": f"Bearer {api_key}"}) as http:
+        async with streamable_http_client(url, http_client=http) as streams:
+            yield streams
 
 
 @asynccontextmanager

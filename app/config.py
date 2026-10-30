@@ -9,8 +9,24 @@ pydantic-settings 会自动从【环境变量】和【.env 文件】读取值，
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def ensure_safe_mcp_endpoint(url: str) -> None:
+    """带着 API 密钥访问远程 MCP 服务端时，必须走 https（本机回环地址除外）。
+
+    Bearer 密钥在明文 http 上等于在网线上广播：路径上任何一个设备都能抄走它。
+    宁可启动失败，也不要悄悄地把密钥发出去。
+    """
+    parts = urlsplit(url)
+    if parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in LOOPBACK_HOSTS):
+        return
+    raise ValueError("MCP_HTTP_URL must use https (plain http is only allowed for localhost) because it carries an API key")
 
 
 class Settings(BaseSettings):
@@ -46,8 +62,12 @@ class Settings(BaseSettings):
     # 工具从哪里来：direct = 直接调用 Python 函数；mcp-memory = 同一进程内通过 MCP 协议；
     # mcp-stdio = 启动一个 MCP 服务端子进程。注意：这是【服务端配置】，不允许由请求决定，
     # 否则任何调用方都能让我们为每个请求启动一个子进程（资源耗尽攻击）。
-    tool_source: Literal["direct", "mcp-memory", "mcp-stdio"] = "direct"
+    tool_source: Literal["direct", "mcp-memory", "mcp-stdio", "mcp-http"] = "direct"
     mcp_call_timeout_seconds: float = 20.0
+    # tool_source=mcp-http 时：远程 MCP 服务端的地址，和访问它用的 API 密钥（用 agent 专属、最小权限的 key）。
+    # SecretStr：打印配置、日志、报错时只显示 **********，不会把密钥带出去。
+    mcp_http_url: str = "http://127.0.0.1:8765/mcp"
+    mcp_api_key: SecretStr = SecretStr("")
     # 后台 Worker：自动领取并执行排队的调查任务（Jira Webhook 触发的）。
     worker_enabled: bool = True
     worker_poll_interval_seconds: float = 2.0  # 队列为空时，隔多久再看一次
@@ -72,6 +92,15 @@ class Settings(BaseSettings):
     # env_file：本地开发从项目根目录的 .env 读取。
     # extra="ignore"：.env 里有我们没声明的变量时不报错。
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @model_validator(mode="after")
+    def _check_mcp_http(self) -> "Settings":
+        # 启动时就检查（fail fast），而不是等第一个请求来了才发现配错了。
+        if self.tool_source == "mcp-http":
+            if not self.mcp_api_key.get_secret_value():
+                raise ValueError("TOOL_SOURCE=mcp-http requires MCP_API_KEY")
+            ensure_safe_mcp_endpoint(self.mcp_http_url)
+        return self
 
 
 @lru_cache

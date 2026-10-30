@@ -12,7 +12,7 @@ from app.agent.common import AgentError
 from app.agent.loop import InvestigationAgent
 from app.agent.tools import build_investigation_tools
 from app.scenario import load_scenario
-from tests.fakes import SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls, final_text
+from tests.fakes import GET_TICKET, RICH_REPORT_ARGS, SUBMIT_TOOL_NAME, VALID_REPORT_ARGS, ScriptedLLM, ToolCall, calls, final_text
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ async def test_happy_path_runs_tools_then_submits_report(registry):
             calls(ToolCall("get_ticket", {"ticket_id": "BUG-1042"})),
             calls(ToolCall("search_logs", {"service": "checkout-api", "level": "ERROR"})),
             calls(ToolCall("get_recent_deploys", {"service": "checkout-api"})),
-            calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
+            calls(ToolCall(SUBMIT_TOOL_NAME, RICH_REPORT_ARGS)),
             final_text(),
         ]
     )
@@ -61,7 +61,7 @@ async def test_tool_error_is_returned_to_model_not_raised(registry):
     llm = ScriptedLLM(
         [
             calls(ToolCall("delete_database", {})),  # 模型编造了一个不存在的工具
-            calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
+            calls(GET_TICKET, ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
             final_text(),
         ]
     )
@@ -80,7 +80,7 @@ async def test_report_without_evidence_is_rejected_and_model_can_retry(registry)
     }
     llm = ScriptedLLM(
         [
-            calls(ToolCall(SUBMIT_TOOL_NAME, bad_args)),
+            calls(GET_TICKET, ToolCall(SUBMIT_TOOL_NAME, bad_args)),
             calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
             final_text(),
         ]
@@ -88,15 +88,15 @@ async def test_report_without_evidence_is_rejected_and_model_can_retry(registry)
     result = await InvestigationAgent(llm, registry).investigate("BUG-1042")
 
     # "没有证据不下结论"由代码强制：第一次提交被拒绝，第二次才通过。
-    assert [s.ok for s in result.steps] == [False, True]
-    assert "invalid report" in llm.seen_messages[1][-1].tool_results[0].result
+    assert [s.ok for s in result.steps] == [True, False, True]  # 查工单成功、第一次提交被拒、第二次通过
+    assert "invalid report" in llm.seen_messages[1][-1].tool_results[-1].result
 
 
 async def test_text_only_answer_is_nudged_to_submit(registry):
     llm = ScriptedLLM(
         [
             calls(text="I think it is the database."),  # 没调工具，也没提交
-            calls(ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
+            calls(GET_TICKET, ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)),
             final_text(),
         ]
     )

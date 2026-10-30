@@ -3,8 +3,9 @@
     direct      Agent --> Python 函数                      最快，没有协议开销
     mcp-memory  Agent --> MCP 客户端 --(内存)--> MCP 服务端 --> Python 函数   同一进程，但走完整的 MCP 协议
     mcp-stdio   Agent --> MCP 客户端 --(管道)--> 子进程里的 MCP 服务端        真正的进程边界
+    mcp-http    Agent --> MCP 客户端 --(HTTPS + Bearer 密钥)--> 远程 MCP 服务端   跨机器、需要认证
 
-三种方式 Agent 看到的工具、拿到的结果完全一样（测试里逐个工具比对过）。
+几种方式 Agent 看到的工具、拿到的结果完全一样（测试里逐个工具比对过）。
 区别只在"调用要经过多少层"：层越多，越灵活（工具可以由别的团队、别的语言、别的机器提供），
 也越慢、越多出错的可能。scripts/compare_tool_transports.py 可以量出每一层的代价。
 """
@@ -18,7 +19,7 @@ from mcp.client.stdio import StdioServerParameters
 
 from app.agent.tools import ToolProvider, build_investigation_tools
 from app.config import Settings
-from app.mcp_client import connect_mcp
+from app.mcp_client import bearer_http_transport, connect_mcp
 from app.mcp_server import build_mcp_server
 from app.rag.retrieval import KnowledgeBase
 from app.scenario import Scenario
@@ -52,6 +53,9 @@ async def open_tools(
 
     if settings.tool_source == "mcp-memory":
         target = build_mcp_server(build_investigation_tools(scenario, knowledge))
+    elif settings.tool_source == "mcp-http":
+        # 远程服务端自己决定数据（场景、知识库）；这里只带上凭证。
+        target = bearer_http_transport(settings.mcp_http_url, settings.mcp_api_key.get_secret_value())
     else:  # mcp-stdio
         import os
 

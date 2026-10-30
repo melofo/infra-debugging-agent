@@ -2,6 +2,7 @@
  * 调用后端 API 的封装。界面组件不直接写 fetch，都通过这里，
  * 这样后端地址、错误处理、SSE 解析只需要维护一处（类似 Java 里的 Service / Client 层）。
  */
+import { authHeaders } from "./auth";
 import { parseSse } from "./sse";
 import type { JobDetail, JobSummary, SessionInfo, Step, Turn } from "./types";
 
@@ -29,13 +30,16 @@ async function toApiError(response: Response): Promise<ApiError> {
   } catch {
     // 响应体不是 JSON，就用状态文字。
   }
+  // 401 / 403 对用户来说是"该怎么办"的问题，给出可操作的提示，而不是原样显示服务端的一句话。
+  if (response.status === 401) detail = "Missing or invalid API key. Enter a valid key in the top bar.";
+  if (response.status === 403) detail = "This API key is not allowed to do that. Ask for a key with more access.";
   return new ApiError(response.status, detail);
 }
 
 export async function createSession(scenario = "bug-1042"): Promise<SessionInfo> {
   const response = await fetch(`${API_URL}/sessions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ scenario }),
   });
   if (!response.ok) throw await toApiError(response);
@@ -61,7 +65,7 @@ export async function sendMessage(
 ): Promise<void> {
   const response = await fetch(`${API_URL}/sessions/${encodeURIComponent(sessionId)}/messages/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ message }),
     signal,
   });
@@ -88,14 +92,14 @@ export async function sendMessage(
 
 /** 最近的自动调查任务（列表页）。signal 用来在组件卸载时取消请求。 */
 export async function listJobs(signal?: AbortSignal): Promise<JobSummary[]> {
-  const response = await fetch(`${API_URL}/jobs`, { signal });
+  const response = await fetch(`${API_URL}/jobs`, { headers: authHeaders(), signal });
   if (!response.ok) throw await toApiError(response);
   return response.json();
 }
 
 /** 单个任务的完整详情。 */
 export async function getJob(id: string, signal?: AbortSignal): Promise<JobDetail> {
-  const response = await fetch(`${API_URL}/jobs/${encodeURIComponent(id)}`, { signal });
+  const response = await fetch(`${API_URL}/jobs/${encodeURIComponent(id)}`, { headers: authHeaders(), signal });
   if (!response.ok) throw await toApiError(response);
   return response.json();
 }

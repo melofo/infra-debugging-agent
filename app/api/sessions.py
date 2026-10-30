@@ -35,6 +35,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.agent.common import AgentError, StepRecord, session_system_prompt
+from app.auth import Principal, require_scope
 from app.agent.loop import InvestigationAgent
 from app.agent.tools import build_investigation_tools
 from app.api.chat import get_llm_client
@@ -67,7 +68,10 @@ class MessageIn(BaseModel):
 
 @router.post("/sessions", response_model=SessionOut, status_code=201)  # 201 = Created，创建资源的标准状态码
 async def create_session(
-    request: CreateSessionRequest, http_request: Request, store: SessionStore = Depends(get_session_store)
+    request: CreateSessionRequest,
+    http_request: Request,
+    store: SessionStore = Depends(get_session_store),
+    principal: Principal = Depends(require_scope("investigate:run")),
 ) -> SessionOut:
     try:
         scenario = load_scenario(request.scenario)
@@ -76,13 +80,17 @@ async def create_session(
     # 会话创建时决定用不用知识库检索；整个会话期间工具集保持不变，对话历史里的工具调用才前后一致。
     knowledge = await active_knowledge_base(getattr(http_request.app.state, "knowledge", None))
     registry = build_investigation_tools(scenario, knowledge)
-    session = store.create(request.scenario, scenario.ticket.id, registry)
+    session = store.create(request.scenario, scenario.ticket.id, registry, owner=principal.name)
     return _to_out(session)
 
 
 @router.get("/sessions/{session_id}", response_model=SessionOut)
-def get_session(session_id: str, store: SessionStore = Depends(get_session_store)) -> SessionOut:
-    return _to_out(_find_session(store, session_id))
+def get_session(
+    session_id: str,
+    store: SessionStore = Depends(get_session_store),
+    principal: Principal = Depends(require_scope("investigate:run")),
+) -> SessionOut:
+    return _to_out(_find_session(store, session_id, principal))
 
 
 @router.post("/sessions/{session_id}/messages", response_model=Turn)
@@ -91,8 +99,9 @@ async def post_message(
     body: MessageIn,
     store: SessionStore = Depends(get_session_store),
     llm: LLMClient = Depends(get_llm_client),
+    principal: Principal = Depends(require_scope("investigate:run")),
 ) -> Turn:
-    session = _find_session(store, session_id)
+    session = _find_session(store, session_id, principal)
     await _acquire(session)
     try:
         return await _run_session_turn(session, body.message, llm)
@@ -106,8 +115,9 @@ async def post_message_stream(
     body: MessageIn,
     store: SessionStore = Depends(get_session_store),
     llm: LLMClient = Depends(get_llm_client),
+    principal: Principal = Depends(require_scope("investigate:run")),
 ) -> StreamingResponse:
-    session = _find_session(store, session_id)
+    session = _find_session(store, session_id, principal)
     # 注意：404/409 这类错误必须在开始推流【之前】返回。
     # 一旦开始发送 SSE，HTTP 状态码已经是 200 发出去了，之后再出错只能通过事件告诉客户端。
     # 这里只做"是否正忙"的提前检查，真正拿锁放在下面的生成器里。
@@ -168,9 +178,11 @@ async def post_message_stream(
     )
 
 
-def _find_session(store: SessionStore, session_id: str) -> Session:
+def _find_session(store: SessionStore, session_id: str, principal: Principal) -> Session:
     session = store.get(session_id)
-    if session is None:
+    # 不是所有者（也不是管理员）：返回 404，而不是 403。
+    # 403 会告诉对方"这个会话存在，只是你没权限"，等于确认了会话 id 是有效的；404 让"不存在"和"不属于你"无法区分。
+    if session is None or (session.owner != principal.name and not principal.is_admin):
         raise HTTPException(status_code=404, detail="session not found")
     return session
 

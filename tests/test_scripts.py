@@ -73,3 +73,30 @@ def test_scripts_import_cleanly_from_another_directory(script, tmp_path):
     args = ["--help"] if script == "simulate_jira.py" else []
     result = run_script(script, args, tmp_path, JIRA_WEBHOOK_SECRET="s" * 43)
     assert result.returncode == 0, result.stderr
+
+
+async def test_manage_api_keys_cli_creates_lists_and_revokes(pool, tmp_path):
+    """真实运行 CLI（子进程，连测试库）：创建的密钥能通过校验，列表不泄露密钥，吊销后立刻失效。"""
+    from app import auth
+
+    async with pool.connection() as conn:
+        await conn.execute("TRUNCATE api_keys")
+    db = {"DATABASE_URL": pool.conninfo}
+
+    created = run_script("manage_api_keys.py", ["create", "--name", "cli-user", "--role", "viewer"], tmp_path, **db)
+    assert created.returncode == 0, created.stderr
+    key = next(w for w in created.stdout.split() if w.startswith("agk_"))
+    principal = await auth.authenticate_key(pool, key)
+    assert (principal.name, principal.role) == ("cli-user", "viewer")
+
+    listed = run_script("manage_api_keys.py", ["list"], tmp_path, **db)
+    assert "cli-user" in listed.stdout and "active" in listed.stdout
+    assert key.partition(".")[2] not in listed.stdout + listed.stderr  # 列表里看不到密钥的机密部分
+
+    duplicate = run_script("manage_api_keys.py", ["create", "--name", "cli-user"], tmp_path, **db)
+    assert duplicate.returncode == 1 and "already exists" in duplicate.stdout
+
+    revoked = run_script("manage_api_keys.py", ["revoke", principal.key_id], tmp_path, **db)
+    assert revoked.returncode == 0
+    assert await auth.authenticate_key(pool, key) is None
+    assert run_script("manage_api_keys.py", ["revoke", principal.key_id], tmp_path, **db).returncode == 1

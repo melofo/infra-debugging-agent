@@ -64,6 +64,28 @@ pre {
   color: var(--text);
   border-bottom-color: var(--accent);
 }
+.nav-key {
+  margin-left: auto; /* 推到导航栏最右边 */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.nav-key input {
+  width: 190px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+}
+.nav-key input[aria-invalid="true"] {
+  border-color: #c0392b;
+}
+.nav-key-error {
+  color: #c0392b;
+}
 
 /* 聊天页 */
 .app {

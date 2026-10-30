@@ -11,6 +11,8 @@ import os
 # 所以这里设置了之后，即使 .env 里写了 WORKER_ENABLED=true 也不会生效。
 # 需要测试 Worker 启动的测试，会显式传入自己的配置。
 os.environ["WORKER_ENABLED"] = "false"
+# 同样，自动化测试默认关闭接口认证（环境变量优先于 .env）；专门测认证的测试会显式打开它。
+os.environ["AUTH_REQUIRED"] = "false"
 
 import psycopg
 import pytest

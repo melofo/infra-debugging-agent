@@ -53,3 +53,21 @@ CREATE INDEX IF NOT EXISTS idx_jobs_claimable ON investigation_jobs (run_after) 
 
 -- 回收卡死任务时用：找"running 太久"的任务。
 CREATE INDEX IF NOT EXISTS idx_jobs_running ON investigation_jobs (locked_at) WHERE status = 'running';
+
+-- API 密钥：调用我们接口的人/程序用它证明身份。
+-- 【只存哈希，不存明文】数据库泄露时，攻击者拿到的哈希没法当作钥匙使用。
+-- 明文密钥只在创建时显示一次（见 scripts/manage_api_keys.py），之后谁也看不到，包括我们自己。
+CREATE TABLE IF NOT EXISTS api_keys (
+    key_id        text PRIMARY KEY,                 -- 公开的查找标识，是密钥的一部分（agk_<key_id>.<secret>）
+    name          text NOT NULL,                    -- 这把钥匙属于谁/什么用途，出现在日志和审计里
+    role          text NOT NULL CHECK (role IN ('viewer', 'operator', 'admin')),
+    key_hash      text NOT NULL,                    -- SHA-256(secret)
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    expires_at    timestamptz,                      -- 为空表示不过期
+    revoked_at    timestamptz,                      -- 吊销后立刻失效，但保留记录供审计
+    last_used_at  timestamptz
+);
+
+-- 名字用来标识"是谁"（会话的所有者、日志和审计里的操作人），所以同一时刻不能有两把有效的钥匙同名，
+-- 否则一个人就能冒充另一个人拿到他的会话。换钥匙时先吊销旧的，新的可以沿用同一个名字。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_active_name ON api_keys (name) WHERE revoked_at IS NULL;

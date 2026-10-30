@@ -34,13 +34,13 @@ from psycopg_pool import AsyncConnectionPool
 from app import jobs
 from app.agent.common import AgentError, InvestigationResult
 from app.agent.loop import InvestigationAgent
-from app.agent.tools import build_investigation_tools
 from app.config import Settings
 from app.jobs import Job
 from app.llm.base import LLMClient, LLMError
 from app.rag.retrieval import KnowledgeBase
 from app.rag.runtime import active_knowledge_base
 from app.scenario import load_scenario
+from app.tool_sources import open_tools
 
 logger = logging.getLogger(__name__)
 
@@ -182,9 +182,12 @@ class Worker:
             logger.exception("scenario data is invalid", extra={"scenario": job.scenario})
             raise InvalidJob("investigation data for this ticket is invalid") from None
         # 每个任务开始前检查知识库是否可用：入库之后不需要重启，下一个任务就会用上。
-        registry = build_investigation_tools(scenario, await active_knowledge_base(self._knowledge))
-        agent = InvestigationAgent(self._llm, registry, max_steps=self._settings.agent_max_steps)
-        return await agent.investigate(job.ticket_id)
+        knowledge = await active_knowledge_base(self._knowledge)
+        # 工具来源由配置决定（直接调用 / MCP）。连接在这个 async with 里打开和关闭，
+        # 而 process() 在同一个任务里调用它：MCP 客户端要求"在哪个任务进入，就在同一个任务退出"。
+        async with open_tools(self._settings, job.scenario, scenario, knowledge) as tools:
+            agent = InvestigationAgent(self._llm, tools, max_steps=self._settings.agent_max_steps)
+            return await agent.investigate(job.ticket_id)
 
     async def _fail(self, job: Job, error: str, permanent: bool = False) -> None:
         failed = await jobs.fail(

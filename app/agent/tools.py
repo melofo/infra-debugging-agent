@@ -15,7 +15,7 @@ import inspect
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import psycopg
 from pydantic import BaseModel, Field, ValidationError
@@ -43,6 +43,20 @@ class Tool:
     # 接收校验后的参数对象，返回可被 JSON 序列化的结果。
     # 可以是普通函数（直接返回结果），也可以是 async 函数（返回协程，执行时会被 await），见 ToolRegistry.execute。
     handler: Callable[[Any], Any]
+
+
+class ToolProvider(Protocol):
+    """Agent 需要的"工具来源"的接口：说明书 + 执行。
+
+    直接调用 Python 函数的 ToolRegistry、以及通过 MCP 协议连接外部服务端的 McpToolRegistry，
+    都满足这个接口，所以 Agent 循环不需要知道工具到底是怎么执行的。（面向接口编程，和 Java 里一样。）
+    """
+
+    def names(self) -> list[str]: ...
+
+    def specs(self) -> list[ToolSpec]: ...
+
+    async def execute(self, name: str, raw_args: dict) -> Any: ...
 
 
 class ToolRegistry:

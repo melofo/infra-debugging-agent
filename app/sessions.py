@@ -47,6 +47,9 @@ class Session:
     scenario_name: str
     ticket_id: str
     registry: ToolRegistry
+    # 谁创建的这个会话（API key 的名字）。只有所有者（和管理员）能访问它：
+    # 否则知道别人的会话 id 就能读到别人的整段对话，这就是 IDOR（不安全的直接对象引用）漏洞。
+    owner: str = "anonymous-dev"
     messages: list[Message] = field(default_factory=list)
     turns: list[Turn] = field(default_factory=list)
     report: RCAReport | None = None  # 最新的报告；用来判断下一条消息是"首次调查"还是"追问"
@@ -68,10 +71,10 @@ class SessionStore:
         self._sessions: OrderedDict[str, Session] = OrderedDict()
         self._max_sessions = max_sessions
 
-    def create(self, scenario_name: str, ticket_id: str, registry: ToolRegistry) -> Session:
-        # 会话 id 必须不可猜：目前还没有登录认证，知道 id 就等于有权访问这个会话。
+    def create(self, scenario_name: str, ticket_id: str, registry: ToolRegistry, owner: str = "anonymous-dev") -> Session:
+        # 会话 id 必须不可猜（纵深防御；真正的访问控制是 owner 检查，见 app/api/sessions.py 的 _find_session）。
         # secrets 模块生成的是密码学安全的随机数；random 模块不行，它的输出是可预测的。
-        session = Session(secrets.token_urlsafe(16), scenario_name, ticket_id, registry)
+        session = Session(secrets.token_urlsafe(16), scenario_name, ticket_id, registry, owner)
         self._sessions[session.id] = session
         while len(self._sessions) > self._max_sessions:
             self._sessions.popitem(last=False)  # 淘汰最旧的

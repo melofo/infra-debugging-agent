@@ -14,16 +14,17 @@ from pydantic import BaseModel, Field
 from app.agent.common import AgentError
 from app.agent.loop import InvestigationAgent
 from app.agent.sdk_afc import SdkAfcAgent
-from app.agent.tools import build_investigation_tools
 from app.api.chat import get_llm_client
+from app.auth import require_scope
 from app.config import get_settings
 from app.llm.base import LLMClient, LLMError
 from app.llm.gemini import GeminiClient
 from app.rag.runtime import active_knowledge_base
 from app.schemas import RCAReport
 from app.scenario import load_scenario
+from app.tool_sources import open_tools
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_scope("investigate:run"))])
 logger = logging.getLogger(__name__)
 
 
@@ -62,18 +63,20 @@ async def investigate(
         raise HTTPException(status_code=404, detail=f"scenario not found: {request.scenario}")
 
     knowledge = await active_knowledge_base(getattr(http_request.app.state, "knowledge", None))
-    registry = build_investigation_tools(scenario, knowledge)
-    max_steps = get_settings().agent_max_steps
-
-    if request.mode == "sdk":
-        if not isinstance(llm, GeminiClient):
-            raise HTTPException(status_code=400, detail="sdk mode requires the Gemini provider")
-        agent = SdkAfcAgent(llm, registry, max_remote_calls=max_steps)
-    else:
-        agent = InvestigationAgent(llm, registry, max_steps=max_steps)
+    settings = get_settings()
+    max_steps = settings.agent_max_steps
+    if request.mode == "sdk" and not isinstance(llm, GeminiClient):
+        raise HTTPException(status_code=400, detail="sdk mode requires the Gemini provider")
 
     try:
-        result = await agent.investigate(scenario.ticket.id)
+        # 工具来源（直接调用 / MCP）由服务端配置决定，不由请求决定：
+        # 否则任何调用方都能让我们为每个请求启动一个子进程。
+        async with open_tools(settings, request.scenario, scenario, knowledge) as tools:
+            if request.mode == "sdk":
+                agent = SdkAfcAgent(llm, tools, max_remote_calls=max_steps)
+            else:
+                agent = InvestigationAgent(llm, tools, max_steps=max_steps)
+            result = await agent.investigate(scenario.ticket.id)
     except LLMError:
         logger.exception("llm call failed during investigation")
         raise HTTPException(status_code=502, detail="LLM provider error")

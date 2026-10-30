@@ -6,11 +6,12 @@ from functools import lru_cache
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.auth import require_scope
 from app.config import get_settings
 from app.llm.base import LLMClient, LLMError
 from app.llm.factory import LLMNotConfigured, create_llm_client
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_scope("investigate:run"))])
 # 每个模块用 __name__ 创建自己的 logger（Java 里的 LoggerFactory.getLogger(Foo.class)）。
 logger = logging.getLogger(__name__)
 

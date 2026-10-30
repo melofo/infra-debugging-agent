@@ -19,11 +19,12 @@ from pydantic import BaseModel, ValidationError
 
 from app import jobs
 from app.agent.common import StepRecord
+from app.auth import require_scope
 from app.db import get_pool
 from app.jobs import Job
 from app.schemas import RCAReport
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_scope("jobs:read"))])
 logger = logging.getLogger(__name__)
 
 JobStatus = Literal["queued", "running", "succeeded", "failed"]

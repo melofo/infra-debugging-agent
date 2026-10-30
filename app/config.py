@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # hash = 离线的特征哈希向量（不花钱、可重复，但只反映用词重叠，只适合测试和没有 key 时的本地开发）。
     embedding_provider: Literal["gemini", "hash"] = "gemini"
     embedding_model: str = "gemini-embedding-001"  # 以你账号里实际可用的向量化模型为准
+    # 工具从哪里来：direct = 直接调用 Python 函数；mcp-memory = 同一进程内通过 MCP 协议；
+    # mcp-stdio = 启动一个 MCP 服务端子进程。注意：这是【服务端配置】，不允许由请求决定，
+    # 否则任何调用方都能让我们为每个请求启动一个子进程（资源耗尽攻击）。
+    tool_source: Literal["direct", "mcp-memory", "mcp-stdio"] = "direct"
+    mcp_call_timeout_seconds: float = 20.0
     # 后台 Worker：自动领取并执行排队的调查任务（Jira Webhook 触发的）。
     worker_enabled: bool = True
     worker_poll_interval_seconds: float = 2.0  # 队列为空时，隔多久再看一次
@@ -54,6 +59,9 @@ class Settings(BaseSettings):
     shutdown_grace_seconds: float = 10.0  # 关闭服务时，最多等当前任务多久，超时就放回队列
     job_retry_base_delay_seconds: float = 10.0  # 失败重试的退避起点，之后翻倍
     job_retry_max_delay_seconds: float = 300.0
+    # 接口认证。默认【必须认证】（fail closed）：忘了配置不能变成"对全世界开放"。
+    # 只有在本地开发、或自动化测试里才应该显式关闭；关闭时启动会打出醒目的警告。
+    auth_required: bool = True
     # 允许哪些网页来源调用我们的 API（CORS，见 main.py）。默认只放行本地前端开发服务器。
     # 环境变量里用 JSON 数组写：CORS_ORIGINS='["https://my-ui.example.com"]'
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]

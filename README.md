@@ -119,6 +119,22 @@ Then open http://localhost:3000/jobs to watch the job go Queued, Running, Done. 
 
 The investigation tools (ticket, logs, deployments, runbook/knowledge search) are also exposed as a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, so any MCP host can use them: `scripts/mcp_server.py` (`--knowledge` adds semantic search). All tools are declared read-only and share their definitions, argument validation and limits with the agent's own tool registry; the agent's `submit_rca_report` action is deliberately not exposed. Connect it to Claude Code with `claude mcp add infra-debugging -- <project>/.venv/bin/python <project>/scripts/mcp_server.py`.
 
+The agent can also consume its tools **through** MCP (`TOOL_SOURCE=direct|mcp-memory|mcp-stdio`, a server-side setting: a request cannot choose it). The MCP client treats the server as untrusted: tool allowlist, read-only requirement, truncated descriptions, schema/result/time limits. `scripts/compare_tool_transports.py` measures what each layer costs.
+
+## API authentication
+
+Every endpoint except `/health` and the HMAC-signed `/webhooks/jira` needs `Authorization: Bearer agk_<id>.<secret>`. Keys have roles (`viewer` reads jobs, `operator` also runs investigations and chat, `admin` also decides approvals later) and are managed by a CLI, not an HTTP endpoint:
+
+```bash
+.venv/bin/python scripts/manage_api_keys.py create --name alice --role operator --expires-in-days 90   # key shown once
+.venv/bin/python scripts/manage_api_keys.py list
+.venv/bin/python scripts/manage_api_keys.py revoke <key_id>
+```
+
+Only a SHA-256 hash of the secret is stored. Failures all return the same 401 (no hint whether a key exists, expired or was revoked), keys in the URL are never accepted, and a database outage returns 503 rather than letting requests through. Sessions belong to the key that created them: other keys get a 404 (admins excepted), so guessing a session id gets you nothing. Paste the key into the top bar of the web UI.
+
+`AUTH_REQUIRED` defaults to `true` (fail closed). For purely local experiments you can set `AUTH_REQUIRED=false` in `.env`; the server logs a warning at startup.
+
 ## Chat UI
 
 A Next.js front end lives in `frontend/` (see `frontend/README.md`). With the backend running:
@@ -131,6 +147,6 @@ The backend allows browser calls from `http://localhost:3000` by default (CORS a
 
 ## Known limitations
 
-- No authentication or rate limiting yet (including on `/jobs`, which exposes investigation results): run it locally only.
+- No rate limiting yet. Authentication is API-key based (see *API authentication*); the key lives in `sessionStorage` in the browser, which is a first-version simplification (an HttpOnly cookie session would be stronger).
 - Data sources are simulated JSON files; real Jira / log / Git connectors are planned.
 - Free-tier Gemini quotas (about 5 requests/minute) can throttle multi-step investigations.

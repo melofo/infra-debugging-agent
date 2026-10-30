@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     相当于 Spring 里的 @PostConstruct / @PreDestroy，或者 ApplicationListener<ContextRefreshedEvent>。
     """
     settings = get_settings()
+    if not settings.auth_required:
+        logger.warning("API AUTHENTICATION IS DISABLED (AUTH_REQUIRED=false). Never run like this in production.")
     pool = create_pool(settings.database_url, settings.db_pool_max_size, settings.db_pool_timeout_seconds)
     app.state.pool = pool
 
@@ -108,7 +110,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Authorization"],  # 浏览器要带 Authorization 头，预检请求必须明确允许它
     )
 
     # Router 相当于 Spring 的 @RestController：每个文件负责一组接口，这里统一注册。

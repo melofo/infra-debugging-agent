@@ -9,7 +9,7 @@
  * 自动生成（比如 openapi-typescript 工具）；等接口稳定后可以换成那样。
  */
 
-export type EvidenceSource = "jira" | "log" | "metric" | "trace" | "git" | "runbook";
+export type EvidenceSource = "jira" | "log" | "metric" | "trace" | "git" | "runbook" | "incident";
 
 export interface Evidence {
   source: EvidenceSource;

@@ -38,10 +38,10 @@ class SdkAfcAgent:
         steps: list[StepRecord] = []
         submitted: list[SubmitRCAArgs] = []  # 用列表当"可修改的盒子"，让下面的函数能把结果存出来
 
-        def run(tool: str, args: dict) -> dict:
+        async def run(tool: str, args: dict) -> dict:
             """所有工具函数共用：走同一个注册表，保留白名单和参数校验，并记录步骤。"""
             try:
-                output = self._registry.execute(tool, args)
+                output = await self._registry.execute(tool, args)
                 steps.append(StepRecord(len(steps) + 1, tool, args, True, preview(output)))
                 # SDK 要求工具返回值能放进 JSON 对象，所以列表要包一层。
                 return output if isinstance(output, dict) else {"result": output}
@@ -50,11 +50,11 @@ class SdkAfcAgent:
                 return {"error": str(exc)}
 
         # 下面这些函数的【签名和 docstring】就是 SDK 生成工具说明书的依据。
-        def get_ticket(ticket_id: str) -> dict:
+        async def get_ticket(ticket_id: str) -> dict:
             """Fetch a Jira ticket (title, description, service, severity, report time)."""
-            return run("get_ticket", {"ticket_id": ticket_id})
+            return await run("get_ticket", {"ticket_id": ticket_id})
 
-        def search_logs(service: str, query: str = "", level: str | None = None, limit: int = 20) -> dict:
+        async def search_logs(service: str, query: str = "", level: str | None = None, limit: int = 20) -> dict:
             """Search application logs of one service. Use it to find errors and when they started.
 
             Args:
@@ -63,33 +63,50 @@ class SdkAfcAgent:
                 level: Only this level: INFO, WARN or ERROR.
                 limit: Max entries to return (1-50).
             """
-            return run("search_logs", {"service": service, "query": query, "level": level, "limit": limit})
+            return await run("search_logs", {"service": service, "query": query, "level": level, "limit": limit})
 
-        def get_recent_deploys(service: str, limit: int = 5) -> dict:
+        async def get_recent_deploys(service: str, limit: int = 5) -> dict:
             """List recent deployments of a service with commit and diff summary, newest first.
 
             Args:
                 service: Service name, e.g. checkout-api.
                 limit: Max deploys to return (1-20).
             """
-            return run("get_recent_deploys", {"service": service, "limit": limit})
+            return await run("get_recent_deploys", {"service": service, "limit": limit})
 
-        def search_runbooks(query: str) -> dict:
+        async def search_runbooks(query: str) -> dict:
             """Search internal runbooks for known symptoms and recommended checks or mitigations.
 
             Args:
                 query: Keywords describing the symptom, e.g. connection pool timeout.
             """
-            return run("search_runbooks", {"query": query})
+            return await run("search_runbooks", {"query": query})
 
-        def submit_rca_report(summary: str, hypotheses: list[dict]) -> dict:
+        async def search_knowledge(
+            query: str, doc_type: str | None = None, service: str | None = None, limit: int = 5
+        ) -> dict:
+            """Search internal runbooks and past incident write-ups by meaning. Describe the symptom in natural
+            language. Results are guidance from documentation and from other incidents, not evidence about this
+            one: confirm them against this incident's own logs and deploys.
+
+            Args:
+                query: Symptom or question in natural language.
+                doc_type: runbook or incident. Omit to search both.
+                service: Only documents for this service (plus generic ones).
+                limit: Max results (1-8).
+            """
+            return await run(
+                "search_knowledge", {"query": query, "doc_type": doc_type, "service": service, "limit": limit}
+            )
+
+        async def submit_rca_report(summary: str, hypotheses: list[dict]) -> dict:
             """Finish the investigation by submitting the root cause analysis report. Call it once, last.
 
             Args:
                 summary: 2-3 sentence summary of the most likely root cause.
                 hypotheses: 1-5 hypotheses. Each is an object with: root_cause (string),
                     confidence (number 0-1), suggested_next_steps (list of strings), and evidence
-                    (non-empty list of objects with: source one of jira/log/metric/trace/git/runbook,
+                    (non-empty list of objects with: source one of jira/log/metric/trace/git/runbook/incident,
                     summary string, reference string such as a commit sha or log message, and
                     optional observed_at ISO-8601 timestamp of when the evidence occurred).
             """
@@ -105,7 +122,14 @@ class SdkAfcAgent:
 
         response = await self._llm.generate_with_python_tools(
             prompt=f"Investigate ticket {ticket_id}.",
-            functions=[get_ticket, search_logs, get_recent_deploys, search_runbooks, submit_rca_report],
+            functions=[
+                get_ticket,
+                search_logs,
+                get_recent_deploys,
+                # 和手写版本保持同样的工具集：知识库可用时用语义检索，否则用关键词版的 runbook 检索。
+                search_knowledge if "search_knowledge" in self._registry.names() else search_runbooks,
+                submit_rca_report,
+            ],
             system=SYSTEM_PROMPT,
             max_remote_calls=self._max_remote_calls,
         )

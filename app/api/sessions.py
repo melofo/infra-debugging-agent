@@ -30,7 +30,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -40,6 +40,7 @@ from app.agent.tools import build_investigation_tools
 from app.api.chat import get_llm_client
 from app.config import get_settings
 from app.llm.base import LLMClient, LLMError
+from app.rag.runtime import active_knowledge_base
 from app.scenario import load_scenario
 from app.sessions import Session, SessionStore, Turn, get_session_store
 
@@ -65,12 +66,16 @@ class MessageIn(BaseModel):
 
 
 @router.post("/sessions", response_model=SessionOut, status_code=201)  # 201 = Created，创建资源的标准状态码
-def create_session(request: CreateSessionRequest, store: SessionStore = Depends(get_session_store)) -> SessionOut:
+async def create_session(
+    request: CreateSessionRequest, http_request: Request, store: SessionStore = Depends(get_session_store)
+) -> SessionOut:
     try:
         scenario = load_scenario(request.scenario)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"scenario not found: {request.scenario}")
-    registry = build_investigation_tools(scenario)
+    # 会话创建时决定用不用知识库检索；整个会话期间工具集保持不变，对话历史里的工具调用才前后一致。
+    knowledge = await active_knowledge_base(getattr(http_request.app.state, "knowledge", None))
+    registry = build_investigation_tools(scenario, knowledge)
     session = store.create(request.scenario, scenario.ticket.id, registry)
     return _to_out(session)
 

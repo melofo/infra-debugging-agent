@@ -38,6 +38,8 @@ from app.agent.tools import build_investigation_tools
 from app.config import Settings
 from app.jobs import Job
 from app.llm.base import LLMClient, LLMError
+from app.rag.retrieval import KnowledgeBase
+from app.rag.runtime import active_knowledge_base
 from app.scenario import load_scenario
 
 logger = logging.getLogger(__name__)
@@ -78,10 +80,12 @@ class Worker:
         llm: LLMClient,
         settings: Settings,
         worker_id: str | None = None,
+        knowledge: KnowledgeBase | None = None,
     ):
         self._pool = pool
         self._llm = llm
         self._settings = settings
+        self._knowledge = knowledge
         self.worker_id = worker_id or make_worker_id()
         self._last_reclaim = float("-inf")  # 单调时钟读数；-inf 表示"从没回收过"，第一轮就会检查
 
@@ -177,7 +181,8 @@ class Worker:
         except ValueError:
             logger.exception("scenario data is invalid", extra={"scenario": job.scenario})
             raise InvalidJob("investigation data for this ticket is invalid") from None
-        registry = build_investigation_tools(scenario)
+        # 每个任务开始前检查知识库是否可用：入库之后不需要重启，下一个任务就会用上。
+        registry = build_investigation_tools(scenario, await active_knowledge_base(self._knowledge))
         agent = InvestigationAgent(self._llm, registry, max_steps=self._settings.agent_max_steps)
         return await agent.investigate(job.ticket_id)
 

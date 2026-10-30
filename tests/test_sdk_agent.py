@@ -26,7 +26,7 @@ class FakeAfcGemini(GeminiClient):
 
     async def generate_with_python_tools(self, prompt, functions, system=None, max_remote_calls=8):
         by_name = {f.__name__: f for f in functions}  # 函数名 -> 函数，模拟 SDK 的 function_map
-        self._script(by_name)
+        await self._script(by_name)  # 真实 SDK 也是 await 这些异步函数
         return LLMResponse(text="", input_tokens=100, output_tokens=20, latency_ms=1)
 
 
@@ -36,10 +36,10 @@ def registry():
 
 
 async def test_sdk_agent_records_steps_and_builds_report(registry):
-    def script(tools):
-        tools["get_ticket"](ticket_id="BUG-1042")
-        tools["search_logs"](service="checkout-api", level="ERROR")
-        tools["submit_rca_report"](**VALID_REPORT_ARGS)
+    async def script(tools):
+        await tools["get_ticket"](ticket_id="BUG-1042")
+        await tools["search_logs"](service="checkout-api", level="ERROR")
+        await tools["submit_rca_report"](**VALID_REPORT_ARGS)
 
     result = await SdkAfcAgent(FakeAfcGemini(script), registry).investigate("BUG-1042")
 
@@ -51,10 +51,10 @@ async def test_sdk_agent_records_steps_and_builds_report(registry):
 async def test_sdk_agent_tool_errors_are_returned_not_raised(registry):
     outputs = {}
 
-    def script(tools):
+    async def script(tools):
         # 拼错的服务名：工具应返回 {"error": ...}（SDK 会把它交还给模型），而不是抛异常。
-        outputs["bad"] = tools["search_logs"](service="payment-service")
-        tools["submit_rca_report"](**VALID_REPORT_ARGS)
+        outputs["bad"] = await tools["search_logs"](service="payment-service")
+        await tools["submit_rca_report"](**VALID_REPORT_ARGS)
 
     result = await SdkAfcAgent(FakeAfcGemini(script), registry).investigate("BUG-1042")
 
@@ -63,9 +63,9 @@ async def test_sdk_agent_tool_errors_are_returned_not_raised(registry):
 
 
 async def test_sdk_agent_rejects_report_without_evidence(registry):
-    def script(tools):
+    async def script(tools):
         bad = {"root_cause": "guess", "confidence": 0.5, "evidence": []}
-        response = tools["submit_rca_report"](summary="s", hypotheses=[bad])
+        response = await tools["submit_rca_report"](summary="s", hypotheses=[bad])
         assert "invalid report" in response["error"]
 
     # 模型没能提交合格的报告 -> 调查失败，而不是把不合格的报告当成功返回。
@@ -74,8 +74,8 @@ async def test_sdk_agent_rejects_report_without_evidence(registry):
 
 
 def test_sdk_mode_works_through_the_api():
-    def script(tools):
-        tools["submit_rca_report"](**VALID_REPORT_ARGS)
+    async def script(tools):
+        await tools["submit_rca_report"](**VALID_REPORT_ARGS)
 
     app.dependency_overrides[get_llm_client] = lambda: FakeAfcGemini(script)
     try:

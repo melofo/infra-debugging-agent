@@ -17,6 +17,7 @@
 
 from dataclasses import dataclass
 
+import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from app.rag.embedder import Embedder
@@ -80,6 +81,31 @@ class KnowledgeBase:
     def __init__(self, pool: AsyncConnectionPool, embedder: Embedder):
         self._pool = pool
         self._embedder = embedder
+
+    async def has_documents(self) -> bool:
+        """知识库里有没有【用当前向量化模型】建好索引的文档。没有的话检索没有意义（用关键词检索兜底）。"""
+        try:
+            async with self._pool.connection() as conn:
+                row = await (
+                    await conn.execute(
+                        "SELECT EXISTS (SELECT 1 FROM knowledge_documents WHERE embedder_id = %s)", (self._embedder.id,)
+                    )
+                ).fetchone()
+            return bool(row[0])
+        except psycopg.Error:  # 表不存在、数据库连不上等：当作"没有"，让调用方降级
+            return False
+
+    async def known_services(self) -> list[str]:
+        """知识库文档里出现过的所有服务名。用来在模型写错服务名时给出明确的提示，而不是静默返回空结果。"""
+        async with self._pool.connection() as conn:
+            rows = await (
+                await conn.execute(
+                    "SELECT DISTINCT unnest(services) AS service FROM knowledge_documents "
+                    "WHERE embedder_id = %s ORDER BY service",
+                    (self._embedder.id,),
+                )
+            ).fetchall()
+        return [r[0] for r in rows]
 
     async def search(
         self,

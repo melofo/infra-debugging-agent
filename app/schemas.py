@@ -39,6 +39,7 @@ class EvidenceSource(str, Enum):
     TRACE = "trace"
     GIT = "git"
     RUNBOOK = "runbook"
+    INCIDENT = "incident"  # 历史事故复盘（知识库里的 INC-xxxx 文档）
 
 
 class Incident(BaseModel):

@@ -81,6 +81,30 @@ def test_python_functions_become_tool_declarations_for_sdk_afc():
     assert "service" in declaration.parameters.properties
 
 
+def test_async_python_functions_also_become_tool_declarations_for_sdk_afc():
+    # 工具包装函数现在是 async 的（它们要访问数据库）。SDK 要能照样从签名和 docstring 生成说明书，
+    # 并且知道该 await 它们。这个测试确认两件事。
+    import inspect
+
+    async def search_knowledge(query: str, doc_type: str | None = None, limit: int = 5) -> dict:
+        """Search runbooks and past incidents by meaning.
+
+        Args:
+            query: Symptom description in natural language.
+            doc_type: runbook or incident.
+            limit: Max results.
+        """
+        return {}
+
+    declaration = types.FunctionDeclaration.from_callable_with_api_option(
+        callable=search_knowledge, api_option="GEMINI_API"
+    )
+    assert declaration.name == "search_knowledge"
+    assert {"query", "doc_type", "limit"} <= set(declaration.parameters.properties)
+    assert declaration.parameters.required == ["query"]  # 只有没有默认值的参数是必填
+    assert inspect.iscoroutinefunction(search_knowledge)  # SDK 靠这个判断要不要 await
+
+
 def test_submit_tool_name_is_stable():
     # 提示词、循环、SDK 版本都按这个名字识别"终止工具"，改名要同步改动，所以锁住它。
     assert SUBMIT_TOOL_NAME == "submit_rca_report"

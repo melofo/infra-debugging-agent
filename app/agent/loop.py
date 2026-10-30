@@ -192,7 +192,7 @@ class InvestigationAgent:
 
                 # 普通调查工具：交给注册表执行（白名单 + 参数校验都在 registry 里）。
                 try:
-                    output = self._registry.execute(call.name, call.args)
+                    output = await self._registry.execute(call.name, call.args)
                     tool_results.append(ToolResult(call.name, output))
                     await add_step(StepRecord(step, call.name, call.args, True, preview(output)))
                 except ToolError as exc:

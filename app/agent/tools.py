@@ -11,14 +11,17 @@
 其中 Pydantic 参数模型一鱼两吃：既用来【校验】参数，又能自动生成【JSON Schema】发给模型。
 """
 
+import inspect
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
+import psycopg
 from pydantic import BaseModel, Field, ValidationError
 
-from app.llm.base import ToolSpec
+from app.llm.base import LLMError, ToolSpec
+from app.rag.retrieval import KnowledgeBase, KnowledgeIndexMismatch
 from app.scenario import Scenario
 
 logger = logging.getLogger(__name__)
@@ -37,7 +40,9 @@ class Tool:
     name: str
     description: str
     args_model: type[BaseModel]  # 参数的 Pydantic 类（注意存的是"类"本身，不是实例）
-    handler: Callable[[Any], Any]  # 接收校验后的参数对象，返回可被 JSON 序列化的结果
+    # 接收校验后的参数对象，返回可被 JSON 序列化的结果。
+    # 可以是普通函数（直接返回结果），也可以是 async 函数（返回协程，执行时会被 await），见 ToolRegistry.execute。
+    handler: Callable[[Any], Any]
 
 
 class ToolRegistry:
@@ -47,6 +52,9 @@ class ToolRegistry:
         self._tools = {tool.name: tool for tool in tools}
         if len(self._tools) != len(tools):
             raise ValueError("duplicate tool names")
+
+    def names(self) -> list[str]:
+        return list(self._tools)
 
     def specs(self) -> list[ToolSpec]:
         """生成发给模型的工具说明书。"""
@@ -61,8 +69,13 @@ class ToolRegistry:
             for tool in self._tools.values()
         ]
 
-    def execute(self, name: str, raw_args: dict) -> Any:
-        """执行模型请求的工具调用。raw_args 是模型给的、未经信任的参数。"""
+    async def execute(self, name: str, raw_args: dict) -> Any:
+        """执行模型请求的工具调用。raw_args 是模型给的、未经信任的参数。
+
+        这是 async 方法，因为有些工具要访问数据库、调用外部接口（比如知识库检索），这些都是异步 I/O。
+        同步的工具（读内存里的数据）照常工作：handler 返回的如果是普通值就直接用，
+        如果返回的是"可等待对象"（调用 async 函数得到的协程），就 await 它。
+        """
         tool = self._tools.get(name)
         if tool is None:
             # 白名单检查：不在注册表里就拒绝。
@@ -73,7 +86,10 @@ class ToolRegistry:
             # 把校验失败的原因告诉模型，方便它自己修正参数。
             raise ToolError(f"invalid arguments for {name}: {exc.errors(include_url=False)}") from exc
         logger.info("tool executed", extra={"tool": name})
-        return tool.handler(args)
+        result = tool.handler(args)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +117,22 @@ class SearchRunbooksArgs(BaseModel):
     query: str = Field(description="Keywords describing the symptom, e.g. 'connection pool timeout'")
 
 
-def build_investigation_tools(scenario: Scenario) -> ToolRegistry:
+class SearchKnowledgeArgs(BaseModel):
+    query: str = Field(
+        min_length=3,
+        max_length=500,
+        description="Describe the symptom or question in natural language, e.g. 'requests time out waiting for a database connection'",
+    )
+    doc_type: Literal["runbook", "incident"] | None = Field(
+        default=None, description="Only runbooks or only past incident write-ups. Omit to search both."
+    )
+    service: str | None = Field(
+        default=None, max_length=64, description="Only documents for this service (plus generic ones). Omit to search all."
+    )
+    limit: int = Field(default=5, ge=1, le=8, description="Max results (1-8)")
+
+
+def build_investigation_tools(scenario: Scenario, knowledge: KnowledgeBase | None = None) -> ToolRegistry:
     """为某个故障场景创建工具集。
 
     处理函数都定义在这个函数里面，用到了外层的 scenario 变量（闭包 closure，
@@ -165,31 +196,89 @@ def build_investigation_tools(scenario: Scenario) -> ToolRegistry:
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [runbook.model_dump(mode="json") for _, runbook in scored[:3]]
 
-    return ToolRegistry(
-        [
+    async def search_knowledge(args: SearchKnowledgeArgs) -> dict:
+        """语义检索 runbook 和历史事故。这是 async 的：要调向量化接口，还要查数据库。"""
+        assert knowledge is not None
+        try:
+            if args.service is not None:
+                known = await knowledge.known_services()
+                if args.service not in known:
+                    # 和日志、发布工具一样：写错服务名要明确报错并给出合法名字，不能静默返回空结果。
+                    raise ToolError(f"unknown service {args.service!r}; known services: {', '.join(known)}")
+            hits = await knowledge.search(
+                args.query,
+                k=args.limit,
+                doc_types=[args.doc_type] if args.doc_type else None,
+                services=[args.service] if args.service else None,
+                max_per_doc=2,  # 每篇文档最多 2 块，让结果覆盖更多不同的文档，而不是被同一篇的各节占满
+            )
+        except ToolError:
+            raise
+        except KnowledgeIndexMismatch:
+            # 内部配置问题。细节只写日志，模型和用户看到的是一句不含内部信息的话。
+            logger.error("knowledge base was indexed with a different embedding model", exc_info=True)
+            raise ToolError("knowledge search is unavailable until the knowledge base is re-indexed") from None
+        except (LLMError, psycopg.Error):
+            logger.warning("knowledge search failed", exc_info=True)
+            raise ToolError("knowledge search is temporarily unavailable; continue with the other tools") from None
+
+        if not hits:
+            return {"results": [], "note": "no matching documents; try different wording or remove the filters"}
+        return {
+            "results": [
+                {
+                    "doc_id": hit.doc_id,  # 引用时用它，例如 RB-101、INC-2031
+                    "doc_type": hit.doc_type,
+                    "title": hit.title,
+                    "section": hit.heading,
+                    "relevance": round(hit.score, 3),  # 余弦相似度，越大越相关
+                    "content": hit.content,
+                }
+                for hit in hits
+            ]
+        }
+
+    tools = [
+        Tool(
+            name="get_ticket",
+            description="Fetch a Jira ticket (title, description, service, severity, report time).",
+            args_model=GetTicketArgs,
+            handler=get_ticket,
+        ),
+        Tool(
+            name="search_logs",
+            description="Search application logs of one service. Use it to find errors and when they started.",
+            args_model=SearchLogsArgs,
+            handler=search_logs,
+        ),
+        Tool(
+            name="get_recent_deploys",
+            description="List recent deployments of a service with commit and diff summary. Use it to find changes near the incident time.",
+            args_model=GetRecentDeploysArgs,
+            handler=get_recent_deploys,
+        ),
+    ]
+    if knowledge is not None:
+        tools.append(
             Tool(
-                name="get_ticket",
-                description="Fetch a Jira ticket (title, description, service, severity, report time).",
-                args_model=GetTicketArgs,
-                handler=get_ticket,
-            ),
-            Tool(
-                name="search_logs",
-                description="Search application logs of one service. Use it to find errors and when they started.",
-                args_model=SearchLogsArgs,
-                handler=search_logs,
-            ),
-            Tool(
-                name="get_recent_deploys",
-                description="List recent deployments of a service with commit and diff summary. Use it to find changes near the incident time.",
-                args_model=GetRecentDeploysArgs,
-                handler=get_recent_deploys,
-            ),
+                name="search_knowledge",
+                description=(
+                    "Search internal runbooks and past incident write-ups by meaning. Describe the symptom in "
+                    "natural language. Results are guidance from documentation and from other incidents, not "
+                    "evidence about this one: confirm them against this incident's own logs and deploys."
+                ),
+                args_model=SearchKnowledgeArgs,
+                handler=search_knowledge,
+            )
+        )
+    else:
+        # 知识库不可用时（没入库、pgvector 不可用、没配置向量化器）的兜底：只用关键词匹配场景自带的 runbook。
+        tools.append(
             Tool(
                 name="search_runbooks",
                 description="Search internal runbooks for known symptoms and recommended checks or mitigations.",
                 args_model=SearchRunbooksArgs,
                 handler=search_runbooks,
-            ),
-        ]
-    )
+            )
+        )
+    return ToolRegistry(tools)

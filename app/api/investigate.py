@@ -8,7 +8,7 @@ mode 参数让我们用同一个接口对比两种实现：
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.agent.common import AgentError
@@ -19,6 +19,7 @@ from app.api.chat import get_llm_client
 from app.config import get_settings
 from app.llm.base import LLMClient, LLMError
 from app.llm.gemini import GeminiClient
+from app.rag.runtime import active_knowledge_base
 from app.schemas import RCAReport
 from app.scenario import load_scenario
 
@@ -53,14 +54,15 @@ class InvestigateResponse(BaseModel):
 
 @router.post("/investigate", response_model=InvestigateResponse)
 async def investigate(
-    request: InvestigateRequest, llm: LLMClient = Depends(get_llm_client)
+    request: InvestigateRequest, http_request: Request, llm: LLMClient = Depends(get_llm_client)
 ) -> InvestigateResponse:
     try:
         scenario = load_scenario(request.scenario)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"scenario not found: {request.scenario}")
 
-    registry = build_investigation_tools(scenario)
+    knowledge = await active_knowledge_base(getattr(http_request.app.state, "knowledge", None))
+    registry = build_investigation_tools(scenario, knowledge)
     max_steps = get_settings().agent_max_steps
 
     if request.mode == "sdk":

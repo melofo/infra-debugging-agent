@@ -286,6 +286,9 @@ pre {
 .badge-runbook {
   background: #d6f2e1;
 }
+.badge-incident {
+  background: #fbd9e4;
+}
 .badge-jira {
   background: #d3e4ff;
 }

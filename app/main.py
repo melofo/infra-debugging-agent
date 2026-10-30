@@ -20,6 +20,8 @@ from app.config import get_settings
 from app.db import create_pool, init_knowledge_schema, init_schema
 from app.llm.factory import LLMNotConfigured, create_llm_client
 from app.logging_config import configure_logging
+from app.rag.embedder import create_embedder
+from app.rag.retrieval import KnowledgeBase
 from app.worker import Worker
 
 logger = logging.getLogger(__name__)
@@ -39,11 +41,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 这是"降级运行"的设计：数据库不可用时，聊天和调查功能照常工作，
     # 只有依赖数据库的功能（Webhook、任务队列）返回 503。/ready 接口会如实反映数据库状态。
     await pool.open(wait=False)
+    app.state.knowledge_ready = False
+    app.state.knowledge = None
     try:
         await init_schema(pool)
         logger.info("database ready")
         # 知识库表需要 pgvector：失败只意味着语义检索不可用，不影响其他功能。
         app.state.knowledge_ready = await init_knowledge_schema(pool)
+        if app.state.knowledge_ready:
+            # 知识库检索需要向量化器（Gemini 向量化要 API key）。创建不了就不启用，调查会用关键词版 runbook 检索兜底。
+            try:
+                app.state.knowledge = KnowledgeBase(pool, create_embedder(settings))
+            except LLMNotConfigured:
+                logger.warning("knowledge search disabled: embedder is not configured")
     except Exception:
         logger.exception("database not available at startup; job features disabled until restart")
 
@@ -53,7 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     stop = asyncio.Event()
     if settings.worker_enabled:
         try:
-            worker = Worker(pool, create_llm_client(settings), settings)
+            worker = Worker(pool, create_llm_client(settings), settings, knowledge=app.state.knowledge)
             worker_task = asyncio.create_task(worker.run(stop), name="investigation-worker")
         except LLMNotConfigured:
             logger.warning("worker not started: LLM is not configured; queued jobs will wait")

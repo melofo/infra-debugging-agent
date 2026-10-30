@@ -16,6 +16,27 @@ from google.genai import types
 from app.llm.base import LLMError, LLMResponse, Message, ToolCall, ToolSpec
 
 
+def build_http_options(timeout_seconds: float, max_attempts: int) -> types.HttpOptions:
+    """超时和重试策略，聊天客户端和向量化客户端共用。"""
+    return types.HttpOptions(
+        timeout=int(timeout_seconds * 1000),
+        # 重试策略：只重试"过一会儿可能就好"的临时性错误。
+        #   429 = 限流（请求太频繁，免费额度是每分钟固定次数）
+        #   503 = 服务过载（"high demand"）
+        # 其他错误（400 参数错、401 key 错）重试也没用，不重试。
+        # 指数退避（exponential backoff）：等待时间逐次翻倍（约 8s、16s、32s），
+        # 加随机抖动（jitter）避免很多客户端同时重试把服务再次打垮。
+        # 注意：重试会让一次调用变得更久，这类等待在生产里应该放进后台任务。
+        retry_options=types.HttpRetryOptions(
+            attempts=max_attempts,  # 含第一次请求，所以 4 表示最多重试 3 次
+            initial_delay=8.0,
+            max_delay=40.0,
+            exp_base=2.0,
+            http_status_codes=[429, 503],
+        ),
+    )
+
+
 class GeminiClient:
     def __init__(
         self, api_key: str, model: str, timeout_seconds: float = 30.0, max_attempts: int = 4
@@ -23,26 +44,7 @@ class GeminiClient:
         self._model = model  # 下划线开头是约定：表示"内部使用"，类似 Java 的 private
         # 超时必须设置：LLM 偶尔会卡很久，没有超时的话，一个慢请求会一直占着资源。
         # SDK 的超时单位是毫秒，所以乘以 1000。
-        self._client = genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(
-                timeout=int(timeout_seconds * 1000),
-                # 重试策略：只重试"过一会儿可能就好"的临时性错误。
-                #   429 = 限流（请求太频繁，免费额度是每分钟 5 次）
-                #   503 = 服务过载（"high demand"）
-                # 其他错误（400 参数错、401 key 错）重试也没用，不重试。
-                # 指数退避（exponential backoff）：等待时间逐次翻倍（约 8s、16s、32s），
-                # 加随机抖动（jitter）避免很多客户端同时重试把服务再次打垮。
-                # 注意：重试会让一次调用变得更久，这类等待在生产里应该放进后台任务（Phase 4）。
-                retry_options=types.HttpRetryOptions(
-                    attempts=max_attempts,  # 含第一次请求，所以 4 表示最多重试 3 次
-                    initial_delay=8.0,
-                    max_delay=40.0,
-                    exp_base=2.0,
-                    http_status_codes=[429, 503],
-                ),
-            ),
-        )
+        self._client = genai.Client(api_key=api_key, http_options=build_http_options(timeout_seconds, max_attempts))
 
     async def generate(self, prompt: str, system: str | None = None) -> LLMResponse:
         # perf_counter 是测量耗时用的单调时钟，比 time.time() 更适合算时间差。

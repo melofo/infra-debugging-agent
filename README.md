@@ -107,6 +107,10 @@ Then open http://localhost:3000/jobs to watch the job go Queued, Running, Done. 
 - The UI has an "Automatic investigations" page (`/jobs`, polling every 3 seconds) and a detail page (`/jobs/<id>`) that stops polling once the job is finished.
 - Error messages stored on jobs are user-facing: they never contain server paths or internal exception text (details go to the server log only).
 
+## Knowledge base (RAG, in progress)
+
+`data/knowledge/` holds runbooks and past incident write-ups (Markdown with YAML front matter). They are split into heading-based chunks (`app/rag/chunking.py`), turned into 768-dimension vectors (`app/rag/embedder.py`: Gemini embeddings, or an offline hash embedder for tests and key-less development via `EMBEDDING_PROVIDER=hash`) and stored in PostgreSQL with pgvector (`app/schema_knowledge.sql`, HNSW cosine index). Load it with `scripts/ingest_knowledge.py` (idempotent: unchanged documents are skipped and never re-embedded; `--dry-run` shows the plan; `--embedder hash` works offline). Ingestion computes all vectors first and then switches the database in one transaction, so a failure never leaves a half-updated knowledge base. Search it with `scripts/search_knowledge.py "your question"`: it embeds the question, finds the nearest chunks by cosine distance (HNSW index) and applies optional filters (document type, service). The agent tool comes next. Without the pgvector extension the app still starts; only semantic search is unavailable.
+
 ## Chat UI
 
 A Next.js front end lives in `frontend/` (see `frontend/README.md`). With the backend running:

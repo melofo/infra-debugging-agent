@@ -8,6 +8,7 @@ pydantic-settings 会自动从【环境变量】和【.env 文件】读取值，
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -38,6 +39,10 @@ class Settings(BaseSettings):
     # 而不是"没密钥就不验证"：宁可不可用，也不能对外开放一个无需认证的入口。
     jira_webhook_secret: str = ""
     webhook_max_body_bytes: int = 262144  # 256KB。Jira 的事件很小，更大的请求一律拒绝
+    # 知识库向量化。gemini = 真实的语义向量（需要 GEMINI_API_KEY，花额度）；
+    # hash = 离线的特征哈希向量（不花钱、可重复，但只反映用词重叠，只适合测试和没有 key 时的本地开发）。
+    embedding_provider: Literal["gemini", "hash"] = "gemini"
+    embedding_model: str = "gemini-embedding-001"  # 以你账号里实际可用的向量化模型为准
     # 后台 Worker：自动领取并执行排队的调查任务（Jira Webhook 触发的）。
     worker_enabled: bool = True
     worker_poll_interval_seconds: float = 2.0  # 队列为空时，隔多久再看一次

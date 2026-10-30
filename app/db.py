@@ -13,12 +13,14 @@
 import logging
 from pathlib import Path
 
+import psycopg
 from fastapi import HTTPException, Request
 from psycopg_pool import AsyncConnectionPool
 
 logger = logging.getLogger(__name__)
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+KNOWLEDGE_SCHEMA_PATH = Path(__file__).with_name("schema_knowledge.sql")
 
 
 def create_pool(database_url: str, max_size: int = 5, timeout: float = 5.0) -> AsyncConnectionPool:
@@ -41,6 +43,21 @@ async def init_schema(pool: AsyncConnectionPool) -> None:
     # （和 JDBC 里 autoCommit=false 然后手动 commit/rollback 是同一回事，只是自动化了。）
     async with pool.connection() as conn:
         await conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
+async def init_knowledge_schema(pool: AsyncConnectionPool) -> bool:
+    """建知识库的表（需要 pgvector）。成功返回 True；pgvector 不可用时返回 False，而不是抛异常。
+
+    知识库检索是"增强功能"：它不可用时，任务队列、聊天、Webhook 都应该照常工作。
+    所以这里把失败转成返回值，由调用方决定怎么降级（比如改用关键词检索）。
+    """
+    try:
+        async with pool.connection() as conn:
+            await conn.execute(KNOWLEDGE_SCHEMA_PATH.read_text(encoding="utf-8"))
+        return True
+    except psycopg.Error:
+        logger.warning("knowledge schema unavailable (is the pgvector extension installed?)", exc_info=True)
+        return False
 
 
 async def ping(pool: AsyncConnectionPool) -> bool:

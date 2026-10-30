@@ -18,7 +18,7 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg_pool import AsyncConnectionPool
 
 from app.config import Settings
-from app.db import create_pool, init_schema
+from app.db import create_pool, init_knowledge_schema, init_schema
 
 TEST_DB_NAME = "agent_test"
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -56,3 +56,13 @@ async def pool():
         await conn.execute("TRUNCATE investigation_jobs")
     yield test_pool  # yield 之前是准备，之后是清理
     await test_pool.close()
+
+
+@pytest.fixture
+async def knowledge_pool(pool):
+    """在 pool 的基础上准备好知识库的表（需要 pgvector），每个测试开始前表是空的。"""
+    if not await init_knowledge_schema(pool):
+        pytest.skip("pgvector extension is not available in this PostgreSQL")
+    async with pool.connection() as conn:
+        await conn.execute("TRUNCATE knowledge_documents CASCADE")  # CASCADE 连带清空 knowledge_chunks
+    return pool

@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import chat, health, investigate, jobs, sessions, webhooks
 from app.config import get_settings
-from app.db import create_pool, init_schema
+from app.db import create_pool, init_knowledge_schema, init_schema
 from app.llm.factory import LLMNotConfigured, create_llm_client
 from app.logging_config import configure_logging
 from app.worker import Worker
@@ -42,6 +42,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         await init_schema(pool)
         logger.info("database ready")
+        # 知识库表需要 pgvector：失败只意味着语义检索不可用，不影响其他功能。
+        app.state.knowledge_ready = await init_knowledge_schema(pool)
     except Exception:
         logger.exception("database not available at startup; job features disabled until restart")
 

@@ -39,8 +39,10 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-def configure_logging(level: str = "INFO") -> None:
-    handler = logging.StreamHandler(sys.stdout)
+def configure_logging(level: str = "INFO", stream=None) -> None:
+    # stream 默认是 stdout（Cloud Run 收集容器的 stdout）。
+    # 但 stdio 方式的 MCP 服务器必须把日志写到 stderr：stdout 是协议通道，里面多出一行日志，对方就解析失败了。
+    handler = logging.StreamHandler(stream or sys.stdout)
     handler.setFormatter(JsonFormatter())
 
     root = logging.getLogger()

@@ -115,6 +115,10 @@ Then open http://localhost:3000/jobs to watch the job go Queued, Running, Done. 
 
 `scripts/eval_retrieval.py` compares retrieval strategies (random floor, BM25 keyword search, vector search over whole documents / chunks of 1000 / chunks of 400, hybrid BM25 + vector with rank fusion) on 35 labeled queries (`data/eval/retrieval_queries.json`) and reports hit@k, recall@k and MRR, overall and per query category. It runs in memory (no database); a test checks that its ranking matches the database search. The `disjoint` category contains questions that deliberately share almost no words with their answers, enforced by a test. Use `--embedder hash` for an offline plumbing check (its numbers say nothing about semantic quality) and the default Gemini embedder for real results.
 
+## MCP server
+
+The investigation tools (ticket, logs, deployments, runbook/knowledge search) are also exposed as a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, so any MCP host can use them: `scripts/mcp_server.py` (`--knowledge` adds semantic search). All tools are declared read-only and share their definitions, argument validation and limits with the agent's own tool registry; the agent's `submit_rca_report` action is deliberately not exposed. Connect it to Claude Code with `claude mcp add infra-debugging -- <project>/.venv/bin/python <project>/scripts/mcp_server.py`.
+
 ## Chat UI
 
 A Next.js front end lives in `frontend/` (see `frontend/README.md`). With the backend running:

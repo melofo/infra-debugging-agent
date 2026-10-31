@@ -82,11 +82,22 @@ class Settings(BaseSettings):
     # 接口认证。默认【必须认证】（fail closed）：忘了配置不能变成"对全世界开放"。
     # 只有在本地开发、或自动化测试里才应该显式关闭；关闭时启动会打出醒目的警告。
     auth_required: bool = True
+    # 写操作的人工审批（Phase 6.6）：调查成功后，是否自动生成"往 Jira 回写评论"的【待审批提议】。
+    # 提议本身不会产生任何副作用；只有人批准之后才会真正执行。
+    writeback_proposals_enabled: bool = True
+    approval_ttl_hours: float = 24.0  # 提议多久不处理就过期
     # 允许哪些网页来源调用我们的 API（CORS，见 main.py）。默认只放行本地前端开发服务器。
     # 环境变量里用 JSON 数组写：CORS_ORIGINS='["https://my-ui.example.com"]'
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     # 会话的资源上限。会话存在服务器内存里，没有上限的话，有人不停创建会话就能把内存耗尽（简单的 DoS）。
+    # 会话存在哪里：postgres = 数据库（默认，重启不丢，多实例共享）；memory = 进程内存（仅本地开发和测试）。
+    session_store: Literal["postgres", "memory"] = "postgres"
+    # postgres 模式下是【每个用户】最多保留多少个会话（超出的最旧的被删除）；memory 模式下是全局上限。
     max_sessions: int = 100
+    session_ttl_days: float = 30.0  # 超过这么久没有活动的会话在启动时被清理（对话里含日志等数据，不应该永久保留）
+    # 处理一条消息时占用会话的租约时长。要明显大于一次调查的最长耗时；超时后别人可以接手。
+    session_lease_seconds: float = 180.0
+    max_session_bytes: int = 5_000_000  # 一个会话保存的内容上限，防止历史无限膨胀
     max_turns_per_session: int = 20  # 同时也限制了历史（以及 token 成本）的增长
 
     # env_file：本地开发从项目根目录的 .env 读取。

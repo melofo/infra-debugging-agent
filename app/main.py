@@ -12,9 +12,12 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import psycopg
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from app.api import actions as actions_api
 from app.api import chat, health, investigate, jobs, sessions, webhooks
 from app.config import get_settings
 from app.db import create_pool, init_knowledge_schema, init_schema
@@ -22,6 +25,8 @@ from app.llm.factory import LLMNotConfigured, create_llm_client
 from app.logging_config import configure_logging
 from app.rag.embedder import create_embedder
 from app.rag.retrieval import KnowledgeBase
+from app.rag.runtime import active_knowledge_base
+from app.sessions import PostgresSessionStore, SessionStore, make_registry_factory
 from app.worker import Worker
 
 logger = logging.getLogger(__name__)
@@ -59,6 +64,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.exception("database not available at startup; job features disabled until restart")
 
+    # 会话存储。postgres：会话保存在数据库里，重启不丢；memory：只在本进程内存里（本地开发/测试）。
+    if settings.session_store == "postgres":
+        store = PostgresSessionStore(
+            pool,
+            make_registry_factory(lambda: active_knowledge_base(app.state.knowledge)),
+            max_per_owner=settings.max_sessions,
+            lease_seconds=settings.session_lease_seconds,
+            max_bytes=settings.max_session_bytes,
+        )
+        app.state.session_store = store
+        try:
+            purged = await store.purge_expired(settings.session_ttl_days)
+            if purged:
+                logger.info("expired sessions removed", extra={"count": purged})
+        except Exception:
+            logger.warning("could not remove expired sessions", exc_info=True)
+    else:
+        logger.warning("SESSION_STORE=memory: sessions are lost on restart and not shared between instances")
+        app.state.session_store = SessionStore(max_sessions=settings.max_sessions)
+
     # 启动后台 Worker（和 Web 服务放在同一个进程里，作为一个后台协程）。
     # 需要模型可用才有意义：没配置 API key 时不启动，任务会留在队列里，配置好重启后继续处理。
     worker_task = None
@@ -90,6 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 关闭之后不要留着一个已关闭的池：之后任何人再取它都会拿到一个"死对象"。
     # 置为 None，依赖它的代码（get_pool）会如实报告"数据库不可用"（503）。
     app.state.pool = None
+    app.state.session_store = None
 
 
 def create_app() -> FastAPI:
@@ -98,6 +124,13 @@ def create_app() -> FastAPI:
     configure_logging(settings.log_level)
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+    # 数据库连不上（或借不到连接）：统一返回 503，不把连接串等内部信息漏给调用方。
+    # 认证、会话、任务这些依赖数据库的接口都走这一处，不用各写一份。
+    @app.exception_handler(psycopg.OperationalError)
+    async def database_unavailable(request: Request, exc: psycopg.OperationalError) -> JSONResponse:
+        logger.error("database unavailable", exc_info=exc)
+        return JSONResponse(status_code=503, content={"detail": "database unavailable"})
 
     # 【CORS：跨域资源共享】
     # 浏览器有"同源策略"：网页（localhost:3000）默认不允许去调用另一个来源（localhost:8000）的接口，
@@ -120,6 +153,7 @@ def create_app() -> FastAPI:
     app.include_router(sessions.router)
     app.include_router(webhooks.router)
     app.include_router(jobs.router)
+    app.include_router(actions_api.router)
     return app
 
 

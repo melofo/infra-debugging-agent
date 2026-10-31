@@ -143,7 +143,7 @@ def test_failed_follow_up_is_rolled_back_and_session_stays_usable(store):
     session_id = client.post("/sessions", json={}).json()["id"]
     client.post(f"/sessions/{session_id}/messages", json={"message": "go"})
 
-    session = store.get(session_id)
+    session = store.peek(session_id)
     history_len_before = len(session.messages)
 
     llm.fail_next = True
@@ -170,16 +170,16 @@ def test_turn_limit_is_enforced(store, monkeypatch):
     assert second.status_code == 409
 
 
-def test_oldest_session_is_evicted_when_store_is_full():
+async def test_oldest_session_is_evicted_when_store_is_full():
     small = SessionStore(max_sessions=2)
     registry = build_investigation_tools(load_scenario("bug-1042"))
-    first = small.create("bug-1042", "BUG-1042", registry)
-    second = small.create("bug-1042", "BUG-1042", registry)
-    third = small.create("bug-1042", "BUG-1042", registry)
+    first = await small.create("bug-1042", "BUG-1042", registry)
+    second = await small.create("bug-1042", "BUG-1042", registry)
+    third = await small.create("bug-1042", "BUG-1042", registry)
 
-    assert small.get(first.id) is None  # 最旧的被淘汰，内存占用有上限
-    assert small.get(second.id) is not None
-    assert small.get(third.id) is not None
+    assert await small.get(first.id) is None  # 最旧的被淘汰，内存占用有上限
+    assert await small.get(second.id) is not None
+    assert await small.get(third.id) is not None
 
 
 async def test_concurrent_messages_to_one_session_get_409(store):

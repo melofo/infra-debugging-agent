@@ -55,7 +55,7 @@ async def pool():
     await test_pool.open(wait=True, timeout=5)
     await init_schema(test_pool)
     async with test_pool.connection() as conn:
-        await conn.execute("TRUNCATE investigation_jobs")
+        await conn.execute("TRUNCATE investigation_jobs CASCADE")  # CASCADE：连带清空引用它的 proposed_actions
     yield test_pool  # yield 之前是准备，之后是清理
     await test_pool.close()
 

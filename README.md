@@ -125,6 +125,17 @@ A report is only accepted if every piece of evidence can be traced to data the t
 
 A rejected report goes back to the model with the exact evidence that failed; after two rejections in one turn the turn fails (and is rolled back) rather than delivering an untraceable conclusion. Both the hand-written loop and the SDK variant enforce it, and it works the same through MCP. What it cannot catch: a real quote used to support a wrong conclusion. That is measured by the end-to-end evaluation, not by this check.
 
+## Human approval for write actions
+
+The agent is read-only: it never holds write credentials. When an automatic investigation succeeds, the worker records a **proposal** to post a Jira comment (`GET /actions`, web UI page *Approvals*). Nothing is posted until an `admin` key approves it:
+
+- the comment is rendered from a fixed template, and every model-written field is neutralized first (Jira mentions, links and macros, control and invisible characters are removed), because the text is derived from untrusted logs and tickets;
+- approving means sending the **hash of the exact text the reviewer saw**; if the text changed meanwhile the request is refused (409), and the content is verified again right before sending;
+- state changes are atomic (`UPDATE ... WHERE status = 'pending'`), so two simultaneous approvals or a double click post once; the proposer cannot approve its own proposal; proposals expire (`APPROVAL_TTL_HOURS`, default 24);
+- every step is written to an append-only `audit_log` (database triggers reject UPDATE, DELETE and TRUNCATE; `GET /audit`, admin only).
+
+Posting uses a simulated Jira (a `jira_outbox` table with an idempotency key); a real implementation only needs to satisfy the small `JiraWriter` protocol. Known limitation: a crash exactly while posting leaves the action in `executing` for a human to check. Set `WRITEBACK_PROPOSALS_ENABLED=false` to turn proposals off.
+
 ## MCP server
 
 The investigation tools (ticket, logs, deployments, runbook/knowledge search) are also exposed as a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, so any MCP host can use them: `scripts/mcp_server.py` (`--knowledge` adds semantic search). All tools are declared read-only and share their definitions, argument validation and limits with the agent's own tool registry; the agent's `submit_rca_report` action is deliberately not exposed. Connect it to Claude Code with `claude mcp add infra-debugging -- <project>/.venv/bin/python <project>/scripts/mcp_server.py`.
@@ -150,6 +161,14 @@ Every endpoint except `/health` and the HMAC-signed `/webhooks/jira` needs `Auth
 Only a SHA-256 hash of the secret is stored. Failures all return the same 401 (no hint whether a key exists, expired or was revoked), keys in the URL are never accepted, and a database outage returns 503 rather than letting requests through. Sessions belong to the key that created them: other keys get a 404 (admins excepted), so guessing a session id gets you nothing. Paste the key into the top bar of the web UI.
 
 `AUTH_REQUIRED` defaults to `true` (fail closed). For purely local experiments you can set `AUTH_REQUIRED=false` in `.env`; the server logs a warning at startup.
+
+## Session persistence
+
+Chat sessions live in Postgres (`chat_sessions`), so they survive restarts and are shared by several instances (`SESSION_STORE=memory` keeps the old in-process store for local experiments and tests). The full model history is stored as JSON, including Gemini's raw response objects (the thought signatures must be replayed to the model; unknown raw types are refused at save time instead of silently dropped).
+
+Concurrency works across instances with the same ideas as the job queue: a message first takes a **lease** (`busy_until` + a token, one atomic `UPDATE ... RETURNING` that also reads the latest history), a crashed holder's lease simply expires, and every save must show the lease token and the expected `version` (fencing plus optimistic locking), so a slow instance whose lease expired cannot overwrite the work of the one that took over. The lease is released in a shielded scope, because a cancelled request (client disconnect) would otherwise cancel its own cleanup.
+
+Limits: a size cap per session, a per-user session cap (oldest removed), and sessions idle longer than `SESSION_TTL_DAYS` (default 30) are purged at startup, since conversations contain log excerpts. A session that used knowledge search cannot be resumed while the knowledge base is unavailable (it answers 503 rather than continuing with a different tool set). Tool results are stored in plain JSON, so treat the database as holding sensitive operational data. Sessions do not use MCP (a long-lived MCP connection would need its own owner task).
 
 ## Chat UI
 

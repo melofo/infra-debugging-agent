@@ -104,3 +104,25 @@ export interface JobDetail extends JobSummary {
 export function isFinished(status: JobStatus): boolean {
   return status === "succeeded" || status === "failed";
 }
+
+/** 待审批的写操作（对应后端 app/actions.py 的 Action）。 */
+export type ActionStatus = "pending" | "approved" | "rejected" | "executing" | "executed" | "failed";
+
+export interface ActionItem {
+  id: string;
+  job_id: string;
+  kind: string;
+  ticket_id: string;
+  body: string; // 将要发出去的【确切内容】：审批人看的就是它
+  content_hash: string; // 批准时要把它原样带回去，证明"我批准的就是我看到的这一份"
+  status: ActionStatus;
+  proposed_by: string;
+  created_at: string;
+  expires_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  executed_at: string | null;
+  error: string | null;
+  expired: boolean; // 还是 pending，但已经过期
+}

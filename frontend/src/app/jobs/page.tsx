@@ -81,6 +81,7 @@ export default function JobsPage() {
 }
 
 function describe(error: Error): string {
+  if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return error.message;
   if (error instanceof ApiError && error.status === 503) {
     return "The database is unavailable. Start it with `docker compose up -d db`; this page will recover by itself.";
   }

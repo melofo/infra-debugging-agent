@@ -71,3 +71,97 @@ CREATE TABLE IF NOT EXISTS api_keys (
 -- 名字用来标识"是谁"（会话的所有者、日志和审计里的操作人），所以同一时刻不能有两把有效的钥匙同名，
 -- 否则一个人就能冒充另一个人拿到他的会话。换钥匙时先吊销旧的，新的可以沿用同一个名字。
 CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_active_name ON api_keys (name) WHERE revoked_at IS NULL;
+
+-- ===========================================================================
+-- 写操作的人工审批（Phase 6.6）
+-- ===========================================================================
+-- Agent 只能"提议"一个写操作（比如往 Jira 工单里回写一条评论），不能执行它。
+-- 提议进入 pending，由有 approvals:decide 权限的人看过【确切的内容】后批准，系统才去执行。
+-- 状态机：pending -> approved -> executing -> executed / failed；pending -> rejected；pending 过期后不能再批准。
+CREATE TABLE IF NOT EXISTS proposed_actions (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- ON DELETE CASCADE：任务被删掉时，它的待审批提议没有存在意义，一起删。
+    job_id        uuid        NOT NULL REFERENCES investigation_jobs(id) ON DELETE CASCADE,
+    kind          text        NOT NULL CHECK (kind IN ('jira_comment')),
+    ticket_id     text        NOT NULL,
+    body          text        NOT NULL,
+    -- 内容哈希：批准的是"这一份确切的内容"。批准时要带上审批人看到的哈希，不一致就拒绝；
+    -- 执行前再核对一次库里的内容有没有被改过。否则可能出现"批准时看到 A，实际发出去的是 B"（检查时与使用时不一致，TOCTOU）。
+    content_hash  text        NOT NULL,
+    status        text        NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'approved', 'rejected', 'executing', 'executed', 'failed')),
+    proposed_by   text        NOT NULL DEFAULT 'agent',
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    expires_at    timestamptz NOT NULL,   -- 过期的提议不能再批准：几天前看起来合理的内容，现在可能已经过时
+    decided_by    text,
+    decided_at    timestamptz,
+    decision_note text,
+    executed_at   timestamptz,
+    error         text,
+    -- 同一个任务对同一种操作只会有一个提议：任务重试、Worker 重跑都不会产生重复提议（幂等）。
+    UNIQUE (job_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_actions_status ON proposed_actions (status, created_at DESC);
+
+-- 模拟的 Jira 发件箱：这个项目没有连真实的 Jira，"写评论"就是往这张表里写一行。
+-- idempotency_key UNIQUE：同一个提议无论被执行几次，只会产生一条评论（真实的 Jira 回写也要做同样的去重）。
+CREATE TABLE IF NOT EXISTS jira_outbox (
+    id               bigserial PRIMARY KEY,
+    idempotency_key  text        NOT NULL UNIQUE,
+    ticket_id        text        NOT NULL,
+    body             text        NOT NULL,
+    created_at       timestamptz NOT NULL DEFAULT now()
+);
+
+-- 审计日志：谁、在什么时候、对什么、做了什么。只增不改。
+-- 用数据库触发器强制"只能追加"：连我们自己的代码也不能改或删（出了事故，它是最后的依据）。
+-- 注意这只防得住应用层；能 DROP TRIGGER 的数据库管理员仍然能绕过。
+-- 生产环境应该让应用使用一个只有 INSERT/SELECT 权限的数据库角色，并把日志同步到外部的只读存储。
+CREATE TABLE IF NOT EXISTS audit_log (
+    id           bigserial PRIMARY KEY,
+    at           timestamptz NOT NULL DEFAULT now(),
+    actor        text        NOT NULL,
+    action       text        NOT NULL,
+    target_type  text        NOT NULL,
+    target_id    text        NOT NULL,
+    details      jsonb       NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_log (target_type, target_id);
+
+CREATE OR REPLACE FUNCTION audit_log_is_append_only() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'audit_log is append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER audit_log_no_update_delete
+    BEFORE UPDATE OR DELETE ON audit_log FOR EACH ROW EXECUTE FUNCTION audit_log_is_append_only();
+CREATE OR REPLACE TRIGGER audit_log_no_truncate
+    BEFORE TRUNCATE ON audit_log FOR EACH STATEMENT EXECUTE FUNCTION audit_log_is_append_only();
+
+-- ===========================================================================
+-- 会话持久化（Phase 6.7）
+-- ===========================================================================
+-- 数据库是会话的唯一真相来源：服务重启、多个实例之间，会话都不会丢、不会各说各话。
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id              text PRIMARY KEY,           -- 不可猜测的随机串（见 app/sessions.py）
+    owner           text        NOT NULL,       -- API 密钥的名字；只有所有者（和管理员）能访问
+    scenario        text        NOT NULL,
+    ticket_id       text        NOT NULL,
+    -- 创建会话时有没有启用知识库检索。工具集在整个会话期间必须一致（历史里已经有对应的工具调用），
+    -- 所以要记下来，恢复会话时按同样的方式重建工具。
+    uses_knowledge  boolean     NOT NULL DEFAULT false,
+    messages        jsonb       NOT NULL DEFAULT '[]',   -- 发给模型的完整历史（含工具结果和厂商原始数据）
+    turns           jsonb       NOT NULL DEFAULT '[]',   -- 给界面看的精简记录
+    report          jsonb,
+    -- 乐观锁版本号：每次保存 +1，保存时要求版本号没变。防止两个实例基于同一份旧历史各写各的，后写的把先写的覆盖掉。
+    version         integer     NOT NULL DEFAULT 0,
+    -- 租约："这个会话正在处理一条消息，直到 busy_until"。取代了进程内的锁，所以多个实例之间也能互斥；
+    -- 持有者崩溃了，租约到期后会话会自动恢复可用，不会被永久锁死。
+    -- busy_token 标识租约的持有者：保存和释放都要出示它，租约过期被别人接手后，原来的持有者就不能再写了（围栏）。
+    busy_until      timestamptz,
+    busy_token      text,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_owner ON chat_sessions (owner, updated_at DESC);

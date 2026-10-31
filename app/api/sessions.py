@@ -43,7 +43,16 @@ from app.config import get_settings
 from app.llm.base import LLMClient, LLMError
 from app.rag.runtime import active_knowledge_base
 from app.scenario import load_scenario
-from app.sessions import Session, SessionStore, Turn, get_session_store
+from app.sessions import (
+    Session,
+    SessionConflict,
+    SessionStorage,
+    SessionTooLarge,
+    SessionUnavailable,
+    Turn,
+    get_session_store,
+    release_shielded,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -70,7 +79,7 @@ class MessageIn(BaseModel):
 async def create_session(
     request: CreateSessionRequest,
     http_request: Request,
-    store: SessionStore = Depends(get_session_store),
+    store: SessionStorage = Depends(get_session_store),
     principal: Principal = Depends(require_scope("investigate:run")),
 ) -> SessionOut:
     try:
@@ -80,61 +89,64 @@ async def create_session(
     # 会话创建时决定用不用知识库检索；整个会话期间工具集保持不变，对话历史里的工具调用才前后一致。
     knowledge = await active_knowledge_base(getattr(http_request.app.state, "knowledge", None))
     registry = build_investigation_tools(scenario, knowledge)
-    session = store.create(request.scenario, scenario.ticket.id, registry, owner=principal.name)
+    session = await store.create(
+        request.scenario, scenario.ticket.id, registry, owner=principal.name, uses_knowledge=knowledge is not None
+    )
     return _to_out(session)
 
 
 @router.get("/sessions/{session_id}", response_model=SessionOut)
-def get_session(
+async def get_session(
     session_id: str,
-    store: SessionStore = Depends(get_session_store),
+    store: SessionStorage = Depends(get_session_store),
     principal: Principal = Depends(require_scope("investigate:run")),
 ) -> SessionOut:
-    return _to_out(_find_session(store, session_id, principal))
+    return _to_out(await _find_session(store, session_id, principal))
 
 
 @router.post("/sessions/{session_id}/messages", response_model=Turn)
 async def post_message(
     session_id: str,
     body: MessageIn,
-    store: SessionStore = Depends(get_session_store),
+    store: SessionStorage = Depends(get_session_store),
     llm: LLMClient = Depends(get_llm_client),
     principal: Principal = Depends(require_scope("investigate:run")),
 ) -> Turn:
-    session = _find_session(store, session_id, principal)
-    await _acquire(session)
+    session = await _find_session(store, session_id, principal)
+    await _acquire(store, session)
     try:
-        return await _run_session_turn(session, body.message, llm)
+        return await _run_session_turn(store, session, body.message, llm)
     finally:
-        session.lock.release()  # 无论成功失败都必须释放锁，否则这个会话会被永久锁死
+        # 无论成功失败都必须释放，否则这个会话会一直显示"正忙"（数据库版的租约到期后也会自动恢复，但不该靠它）。
+        # 用 release_shielded：请求被取消（客户端断开）时，普通的 await 会立刻再次被取消，释放就发不出去。
+        await release_shielded(store, session)
 
 
 @router.post("/sessions/{session_id}/messages/stream")
 async def post_message_stream(
     session_id: str,
     body: MessageIn,
-    store: SessionStore = Depends(get_session_store),
+    store: SessionStorage = Depends(get_session_store),
     llm: LLMClient = Depends(get_llm_client),
     principal: Principal = Depends(require_scope("investigate:run")),
 ) -> StreamingResponse:
-    session = _find_session(store, session_id, principal)
+    session = await _find_session(store, session_id, principal)
     # 注意：404/409 这类错误必须在开始推流【之前】返回。
     # 一旦开始发送 SSE，HTTP 状态码已经是 200 发出去了，之后再出错只能通过事件告诉客户端。
     # 这里只做"是否正忙"的提前检查，真正拿锁放在下面的生成器里。
     # 为什么？如果在这里拿锁、在生成器的 finally 里释放，那么客户端在"返回响应"和
     # "生成器开始执行"之间断开的话，生成器从未启动，finally 永远不会运行，
     # 锁就泄漏了，这个会话会被永久锁死。把"拿锁"和"释放"放进同一个 try/finally 才安全。
-    if session.lock.locked():
+    if await store.is_busy(session):
         raise HTTPException(status_code=409, detail="session is busy, wait for the previous message")
 
     async def event_stream() -> AsyncIterator[str]:
-        # 上面的检查和这里拿锁之间隔了一段时间，期间可能被别的请求抢先，所以要再检查一次。
-        # 下面两行之间没有 await，所以是原子的（asyncio.Lock 空闲时 acquire 不会让出控制权）。
-        if session.lock.locked():
+        # 上面的检查和这里拿锁之间隔了一段时间，期间可能被别的请求抢先，所以要再检查一次：
+        # 真正的"占用"是 acquire 这一步（原子操作），上面只是为了能在推流开始前就返回真实的 409。
+        if not await store.acquire(session):
             error = json.dumps({"status": 409, "detail": "session is busy, wait for the previous message"})
             yield f"event: error\ndata: {error}\n\n"
             return
-        await session.lock.acquire()
 
         # 生产者-消费者模式：agent 在后台任务里跑，把事件放进队列；这个生成器从队列取出来推给浏览器。
         # 为什么不直接在生成器里跑 agent？因为 agent 的回调（on_step）需要把事件"推出去"，
@@ -146,7 +158,7 @@ async def post_message_stream(
 
         async def runner() -> None:
             try:
-                turn = await _run_session_turn(session, body.message, llm, on_step)
+                turn = await _run_session_turn(store, session, body.message, llm, on_step)
                 await queue.put(("turn", turn.model_dump_json()))
             except HTTPException as exc:
                 # 推流已经开始，状态码改不了了，把错误作为一个事件发给客户端。
@@ -168,7 +180,7 @@ async def post_message_stream(
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-            session.lock.release()
+            await release_shielded(store, session)
 
     return StreamingResponse(
         event_stream(),
@@ -178,8 +190,12 @@ async def post_message_stream(
     )
 
 
-def _find_session(store: SessionStore, session_id: str, principal: Principal) -> Session:
-    session = store.get(session_id)
+async def _find_session(store: SessionStorage, session_id: str, principal: Principal) -> Session:
+    try:
+        session = await store.get(session_id)
+    except SessionUnavailable:
+        logger.warning("session cannot be restored", extra={"session_id": session_id})
+        raise HTTPException(status_code=503, detail="this session cannot be restored right now")
     # 不是所有者（也不是管理员）：返回 404，而不是 403。
     # 403 会告诉对方"这个会话存在，只是你没权限"，等于确认了会话 id 是有效的；404 让"不存在"和"不属于你"无法区分。
     if session is None or (session.owner != principal.name and not principal.is_admin):
@@ -187,23 +203,24 @@ def _find_session(store: SessionStore, session_id: str, principal: Principal) ->
     return session
 
 
-async def _acquire(session: Session) -> None:
-    """尝试拿到会话锁；拿不到（正忙）就直接报 409，不排队。"""
-    # 检查"是否正忙"和下面的"获取锁"之间没有 await，asyncio 是单线程协作式调度，
-    # 所以这两步之间不会被别的请求插队，不会出现"都以为自己拿到了锁"。
-    # 选择直接返回 409（冲突）而不是排队等待：避免请求越堆越多，也让前端明确知道要等一下。
-    if session.lock.locked():
+async def _acquire(store: SessionStorage, session: Session) -> None:
+    """尝试占用会话；正忙就直接报 409，不排队（排队会让请求越堆越多）。"""
+    try:
+        acquired = await store.acquire(session)
+    except SessionUnavailable:
+        raise HTTPException(status_code=503, detail="this session cannot be restored right now")
+    if not acquired:
         raise HTTPException(status_code=409, detail="session is busy, wait for the previous message")
-    await session.lock.acquire()
 
 
 async def _run_session_turn(
+    store: SessionStorage,
     session: Session,
     message: str,
     llm: LLMClient,
     on_step: Callable[[StepRecord], Awaitable[None]] | None = None,
 ) -> Turn:
-    """在会话里执行一轮。调用方必须已经持有 session.lock。普通接口和流式接口共用这一份逻辑。"""
+    """在会话里执行一轮。调用方必须已经占用了会话（acquire）。普通接口和流式接口共用这一份逻辑。"""
     settings = get_settings()
     if len(session.turns) >= settings.max_turns_per_session:
         # 轮数上限同时限制了历史增长：历史越长，每一轮请求的 token 越多、越贵。
@@ -244,6 +261,13 @@ async def _run_session_turn(
     session.turns.append(turn)
     if result.report is not None:
         session.report = result.report
+    try:
+        await store.save(session)  # 一轮完整成功之后才保存：失败的轮次不会留下半截历史（run_turn 已经回滚了内存里的）
+    except SessionTooLarge:
+        raise HTTPException(status_code=409, detail="this session is too large, start a new session")
+    except SessionConflict:
+        logger.warning("session changed while a turn was running", extra={"session_id": session.id})
+        raise HTTPException(status_code=409, detail="the session was changed elsewhere; reload it and try again")
     logger.info(
         "session turn done",
         extra={

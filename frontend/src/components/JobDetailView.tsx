@@ -28,7 +28,12 @@ export function JobDetailView({ jobId }: { jobId: string }) {
 
       {error && error instanceof ApiError && error.status === 404 && <div className="error">Investigation not found.</div>}
       {error && !(error instanceof ApiError && error.status === 404) && (
-        <div className="error">Could not load this investigation. Is the backend running?</div>
+        <div className="error">
+          {/* 401/403 是"没填或填错密钥/权限不够"，后端本身是好的：给出可操作的提示，而不是让人去查后端有没有启动。 */}
+          {error instanceof ApiError && (error.status === 401 || error.status === 403)
+            ? error.message
+            : "Could not load this investigation. Is the backend running?"}
+        </div>
       )}
       {loading && !job && <p className="subtitle">Loading…</p>}
 

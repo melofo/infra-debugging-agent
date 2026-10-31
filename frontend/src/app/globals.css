@@ -425,3 +425,57 @@ button.suggestion {
 a {
   color: var(--accent);
 }
+
+/* 审批页 */
+.action-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0;
+  background: var(--panel);
+}
+.action-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.action-status {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.action-pending {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.action-failed,
+.action-rejected {
+  color: #c0392b;
+  border-color: #c0392b;
+}
+.action-body {
+  white-space: pre-wrap; /* 保留换行，但长行自动折行 */
+  word-break: break-word;
+  background: rgba(127, 127, 127, 0.08);
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.action-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.action-controls input {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+}
+.action-controls .secondary {
+  background: transparent;
+}

@@ -31,7 +31,7 @@ import uuid
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
-from app import jobs
+from app import actions, jobs
 from app.agent.common import AgentError, InvestigationResult
 from app.agent.loop import InvestigationAgent
 from app.config import Settings
@@ -169,6 +169,7 @@ class Worker:
                 logger.warning("job was reclaimed while running; result discarded", extra=log)
             else:
                 logger.info("job succeeded", extra={**log, "llm_calls": result.llm_calls})
+                await self._propose_writeback(job, result)
 
     async def _investigate(self, job: Job) -> InvestigationResult:
         # 只在"加载数据"这一步把这两类错误认定为"任务本身有问题"。
@@ -188,6 +189,22 @@ class Worker:
         async with open_tools(self._settings, job.scenario, scenario, knowledge) as tools:
             agent = InvestigationAgent(self._llm, tools, max_steps=self._settings.agent_max_steps)
             return await agent.investigate(job.ticket_id)
+
+    async def _propose_writeback(self, job: Job, result: InvestigationResult) -> None:
+        """调查成功后，留下一个"往 Jira 回写评论"的【待审批提议】。这里只提议，绝不执行。
+
+        提议失败不能让已经成功的调查变成失败：只记日志。
+        已知的限制：任务标记成功和创建提议不在同一个事务里；进程恰好在两者之间崩溃，这个任务就不会有提议
+        （调查结果仍然完整可查）。需要更强保证时，可以把两者放进同一个事务，或者用定期对账补建。
+        """
+        if not self._settings.writeback_proposals_enabled or result.report is None:
+            return
+        try:
+            await actions.propose_jira_comment(
+                self._pool, job.id, job.ticket_id, result.report, self._settings.approval_ttl_hours
+            )
+        except Exception:
+            logger.exception("could not create the write-back proposal", extra={"job_id": str(job.id)})
 
     async def _fail(self, job: Job, error: str, permanent: bool = False) -> None:
         failed = await jobs.fail(

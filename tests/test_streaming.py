@@ -82,7 +82,7 @@ def test_stream_result_is_stored_and_lock_released(store):
     session_id = client.post("/sessions", json={}).json()["id"]
     client.post(f"/sessions/{session_id}/messages/stream", json={"message": "go"})
 
-    session = store.get(session_id)
+    session = store.peek(session_id)
     assert not session.lock.locked()  # 流结束后锁必须释放
     assert len(session.turns) == 1
 
@@ -106,7 +106,7 @@ def test_llm_failure_is_sent_as_error_event_and_rolled_back(store):
     assert response.status_code == 200
     events = parse_sse(response.text)
     assert events == [("error", {"status": 502, "detail": "LLM provider error"})]
-    session = store.get(session_id)
+    session = store.peek(session_id)
     assert session.messages == []  # 回滚
     assert not session.lock.locked()
 
@@ -154,7 +154,7 @@ async def test_client_disconnect_releases_lock_and_rolls_back_history(store):
         request = asyncio.create_task(client.post(f"/sessions/{session_id}/messages/stream", json={"message": "go"}))
         await entered.wait()  # 等到 agent 真的跑到了模型调用这一步
 
-        session = store.get(session_id)
+        session = store.peek(session_id)
         assert session.lock.locked()
         assert len(session.messages) == 1  # 用户消息已经进了历史
 

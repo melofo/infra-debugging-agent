@@ -298,7 +298,7 @@ async def test_the_worker_notices_when_the_knowledge_base_gets_ingested_without_
 
     await ingest(knowledge_pool, HashEmbedder(), load_documents())  # 之后运行了入库脚本，没有重启服务
     async with knowledge_pool.connection() as conn:
-        await conn.execute("TRUNCATE investigation_jobs")
+        await conn.execute("TRUNCATE investigation_jobs CASCADE")
     assert "search_knowledge" in await run_one_job(knowledge_pool, empty)  # 下一个任务就用上了
 
 
@@ -313,7 +313,7 @@ async def test_new_sessions_get_the_knowledge_tool_when_available(kb):
         app.state.knowledge = None
         app.dependency_overrides.clear()
     assert response.status_code == 201
-    assert "search_knowledge" in store.get(response.json()["id"]).registry.names()
+    assert "search_knowledge" in store.peek(response.json()["id"]).registry.names()
 
 
 def test_new_sessions_use_the_keyword_tool_without_a_knowledge_base():
@@ -323,7 +323,7 @@ def test_new_sessions_use_the_keyword_tool_without_a_knowledge_base():
         response = TestClient(app).post("/sessions", json={})
     finally:
         app.dependency_overrides.clear()
-    assert "search_runbooks" in store.get(response.json()["id"]).registry.names()
+    assert "search_runbooks" in store.peek(response.json()["id"]).registry.names()
 
 
 def lifespan_settings(**overrides) -> Settings:

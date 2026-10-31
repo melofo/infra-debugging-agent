@@ -251,7 +251,7 @@ async def test_admin_can_open_any_session(client, secured):
 async def test_session_owner_is_the_key_name(client, secured, store):
     alice = await key_for(secured, "alice")
     session_id = await make_session(client, alice)
-    assert store.get(session_id).owner == "alice"
+    assert store.peek(session_id).owner == "alice"
 
 
 async def test_viewer_cannot_read_sessions(client, secured):

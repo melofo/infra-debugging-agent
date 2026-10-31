@@ -4,7 +4,7 @@
  */
 import { authHeaders } from "./auth";
 import { parseSse } from "./sse";
-import type { JobDetail, JobSummary, SessionInfo, Step, Turn } from "./types";
+import type { ActionItem, ActionStatus, JobDetail, JobSummary, SessionInfo, Step, Turn } from "./types";
 
 // NEXT_PUBLIC_ 前缀的环境变量会在【构建时】被写死进发给浏览器的 JS 里，浏览器才读得到。
 // 没有这个前缀的变量只在服务端可见，浏览器里是 undefined。
@@ -100,6 +100,38 @@ export async function listJobs(signal?: AbortSignal): Promise<JobSummary[]> {
 /** 单个任务的完整详情。 */
 export async function getJob(id: string, signal?: AbortSignal): Promise<JobDetail> {
   const response = await fetch(`${API_URL}/jobs/${encodeURIComponent(id)}`, { headers: authHeaders(), signal });
+  if (!response.ok) throw await toApiError(response);
+  return response.json();
+}
+
+/** 待审批/已处理的写操作提议。 */
+export async function listActions(status?: ActionStatus, signal?: AbortSignal): Promise<ActionItem[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await fetch(`${API_URL}/actions${query}`, { headers: authHeaders(), signal });
+  if (!response.ok) throw await toApiError(response);
+  return response.json();
+}
+
+/**
+ * 批准并执行。必须带上审批人【看到的那份内容】的哈希：服务端发现内容变过就会拒绝（409），
+ * 这样"批准的"和"发出去的"不可能不一样。
+ */
+export async function approveAction(id: string, contentHash: string, note?: string): Promise<ActionItem> {
+  const response = await fetch(`${API_URL}/actions/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ content_hash: contentHash, note: note || null }),
+  });
+  if (!response.ok) throw await toApiError(response);
+  return response.json();
+}
+
+export async function rejectAction(id: string, note?: string): Promise<ActionItem> {
+  const response = await fetch(`${API_URL}/actions/${encodeURIComponent(id)}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ note: note || null }),
+  });
   if (!response.ok) throw await toApiError(response);
   return response.json();
 }

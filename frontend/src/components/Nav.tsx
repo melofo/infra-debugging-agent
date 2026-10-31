@@ -11,6 +11,7 @@ import { clearApiKey, getApiKey, setApiKey } from "@/lib/auth";
 const LINKS = [
   { href: "/", label: "Chat" },
   { href: "/jobs", label: "Automatic investigations" },
+  { href: "/approvals", label: "Approvals" },
 ];
 
 /**

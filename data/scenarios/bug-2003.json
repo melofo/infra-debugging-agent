@@ -1,0 +1,146 @@
+{
+  "ticket": {
+    "id": "BUG-2003",
+    "title": "catalog-api keeps restarting and is slow before each restart",
+    "description": "On-call sees the service restart every 20 to 30 minutes. Latency climbs between restarts.",
+    "service": "catalog-api",
+    "severity": "medium",
+    "reported_at": "2026-09-03T14:24:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-03T13:35:00Z",
+      "service": "catalog-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88014 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-03T13:46:00Z",
+      "service": "catalog-api",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-03T13:54:00Z",
+      "service": "catalog-api",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-03T14:00:00Z",
+      "service": "catalog-api",
+      "level": "INFO",
+      "message": "Application started version=6.3.0 heap.max=2048MB"
+    },
+    {
+      "timestamp": "2026-09-03T14:04:00Z",
+      "service": "catalog-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88114 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-03T14:06:00Z",
+      "service": "catalog-api",
+      "level": "WARN",
+      "message": "GC pause 1400ms heap used=78%"
+    },
+    {
+      "timestamp": "2026-09-03T14:07:00Z",
+      "service": "catalog-api",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-03T14:11:00Z",
+      "service": "catalog-api",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9902 amount=42.10"
+    },
+    {
+      "timestamp": "2026-09-03T14:14:00Z",
+      "service": "catalog-api",
+      "level": "WARN",
+      "message": "GC pause 3100ms heap used=91%"
+    },
+    {
+      "timestamp": "2026-09-03T14:19:00Z",
+      "service": "catalog-api",
+      "level": "ERROR",
+      "message": "java.lang.OutOfMemoryError: Java heap space"
+    },
+    {
+      "timestamp": "2026-09-03T14:20:00Z",
+      "service": "catalog-api",
+      "level": "ERROR",
+      "message": "Container terminated reason=OOMKilled restart_count=4"
+    },
+    {
+      "timestamp": "2026-09-03T14:21:00Z",
+      "service": "catalog-api",
+      "level": "INFO",
+      "message": "Application started version=6.3.0 heap.max=2048MB"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-03T13:35:00Z",
+      "service": "catalog-api",
+      "version": "6.3.0",
+      "commit": "82c239f",
+      "author": "kpatel",
+      "summary": "Speed up lookups with a local product cache",
+      "diff_summary": "ProductCache.java: new ConcurrentHashMap cache, no size limit or expiry"
+    },
+    {
+      "timestamp": "2026-08-29T14:00:00Z",
+      "service": "catalog-api",
+      "version": "0.0.1-old",
+      "commit": "d313e00",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-03T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "93df8a1",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-302",
+      "title": "Service restarts repeatedly",
+      "content": "Possible causes: memory leak or unbounded cache, failing health checks, crash loops from bad configuration, node pressure. Look at heap trends, OOM events and what changed in the last release."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "Release 6.3.0 added an in-memory product cache without any eviction, so heap grows until OutOfMemoryError kills the container",
+    "keywords": [
+      "outofmemory|out of memory|oom|heap",
+      "cache",
+      "eviction|unbounded|no limit|without limit|never expire"
+    ],
+    "must_have": [
+      "productcache|product cache|6.3.0|82c239f"
+    ],
+    "category": "memory_leak",
+    "culprit_references": [
+      "82c239f",
+      "java.lang.OutOfMemoryError: Java heap space"
+    ]
+  }
+}

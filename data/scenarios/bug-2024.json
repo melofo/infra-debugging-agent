@@ -1,0 +1,158 @@
+{
+  "ticket": {
+    "id": "BUG-2024",
+    "title": "shipping-api is very slow and times out",
+    "description": "Pages that depend on this service take more than 30 seconds or fail since about 2pm UTC.",
+    "service": "shipping-api",
+    "severity": "high",
+    "reported_at": "2026-09-24T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-24T13:35:00Z",
+      "service": "shipping-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88161 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-24T13:46:00Z",
+      "service": "shipping-api",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-24T13:51:00Z",
+      "service": "shipping-api",
+      "level": "WARN",
+      "message": "Retrying idempotent call attempt=2"
+    },
+    {
+      "timestamp": "2026-09-24T13:54:00Z",
+      "service": "shipping-api",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-24T14:01:00Z",
+      "service": "shipping-api",
+      "level": "WARN",
+      "message": "Call to rates-service took 4800ms (threshold 1000ms)"
+    },
+    {
+      "timestamp": "2026-09-24T14:03:00Z",
+      "service": "shipping-api",
+      "level": "ERROR",
+      "message": "Timeout calling rates-service after 5000ms"
+    },
+    {
+      "timestamp": "2026-09-24T14:04:00Z",
+      "service": "rates-service",
+      "level": "WARN",
+      "message": "thread pool exhausted, requests queued"
+    },
+    {
+      "timestamp": "2026-09-24T14:04:00Z",
+      "service": "shipping-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88261 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-24T14:05:00Z",
+      "service": "shipping-api",
+      "level": "WARN",
+      "message": "Deprecated API v1 endpoint called by legacy client"
+    },
+    {
+      "timestamp": "2026-09-24T14:06:00Z",
+      "service": "shipping-api",
+      "level": "ERROR",
+      "message": "Circuit breaker OPEN for rates-service, failing fast"
+    },
+    {
+      "timestamp": "2026-09-24T14:07:00Z",
+      "service": "shipping-api",
+      "level": "ERROR",
+      "message": "Request failed status=503 cause=CallNotPermittedException for rates-service"
+    },
+    {
+      "timestamp": "2026-09-24T14:07:00Z",
+      "service": "shipping-api",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-24T14:09:00Z",
+      "service": "rates-service",
+      "level": "ERROR",
+      "message": "thread pool exhausted, requests queued (queue depth 912)"
+    },
+    {
+      "timestamp": "2026-09-24T14:11:00Z",
+      "service": "shipping-api",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9923 amount=42.10"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-19T14:00:00Z",
+      "service": "shipping-api",
+      "version": "0.0.1-old",
+      "commit": "babaff3",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-24T13:57:00Z",
+      "service": "shipping-api",
+      "version": "99.0.0-docs",
+      "commit": "14e1295",
+      "author": "mchen",
+      "summary": "Update API documentation",
+      "diff_summary": "docs/openapi.yaml: description updates"
+    },
+    {
+      "timestamp": "2026-09-24T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "d87d660",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-303",
+      "title": "High latency and timeouts",
+      "content": "Possible causes: a slow dependency, a recent deploy of this service, resource saturation, network issues. Check dependency latency first, then recent deploys, then CPU and memory."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "The downstream rates-service became slow (thread pool exhausted, requests queued), calls from shipping-api timed out and the circuit breaker opened",
+    "keywords": [
+      "rates-service",
+      "timeout|timed out|timing out|times out|slow|unresponsive",
+      "circuit breaker|circuit-breaker|lock wait|thread pool|provider|latency|exhaust|queued"
+    ],
+    "must_have": [
+      "rates-service"
+    ],
+    "category": "slow_dependency",
+    "culprit_references": [
+      "Timeout calling rates-service after 5000ms",
+      "Circuit breaker OPEN for rates-service"
+    ]
+  }
+}

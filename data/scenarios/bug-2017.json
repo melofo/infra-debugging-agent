@@ -1,0 +1,149 @@
+{
+  "ticket": {
+    "id": "BUG-2017",
+    "title": "email-service gets rejected by mail-relay",
+    "description": "Requests from this service to mail-relay started failing at about 1:05pm UTC. No release happened.",
+    "service": "email-service",
+    "severity": "high",
+    "reported_at": "2026-09-17T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-17T13:35:00Z",
+      "service": "email-service",
+      "level": "INFO",
+      "message": "Order placed order_id=88112 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-17T13:46:00Z",
+      "service": "email-service",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-17T13:51:00Z",
+      "service": "email-service",
+      "level": "WARN",
+      "message": "Retrying idempotent call attempt=2"
+    },
+    {
+      "timestamp": "2026-09-17T13:54:00Z",
+      "service": "email-service",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-17T13:56:00Z",
+      "service": "email-service",
+      "level": "INFO",
+      "message": "Calling mail-relay ok status=200"
+    },
+    {
+      "timestamp": "2026-09-17T14:00:00Z",
+      "service": "secrets-manager",
+      "level": "INFO",
+      "message": "Secret mail-relay-password rotated version=12 by rotation-job"
+    },
+    {
+      "timestamp": "2026-09-17T14:01:00Z",
+      "service": "email-service",
+      "level": "ERROR",
+      "message": "mail-relay returned 401 Unauthorized: invalid credentials"
+    },
+    {
+      "timestamp": "2026-09-17T14:03:00Z",
+      "service": "email-service",
+      "level": "ERROR",
+      "message": "mail-relay returned 401 Unauthorized: invalid credentials"
+    },
+    {
+      "timestamp": "2026-09-17T14:04:00Z",
+      "service": "email-service",
+      "level": "INFO",
+      "message": "Order placed order_id=88212 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-17T14:05:00Z",
+      "service": "email-service",
+      "level": "WARN",
+      "message": "Deprecated API v1 endpoint called by legacy client"
+    },
+    {
+      "timestamp": "2026-09-17T14:07:00Z",
+      "service": "email-service",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-17T14:08:00Z",
+      "service": "email-service",
+      "level": "WARN",
+      "message": "Cached credential age=2h12m"
+    },
+    {
+      "timestamp": "2026-09-17T14:11:00Z",
+      "service": "email-service",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9916 amount=42.10"
+    },
+    {
+      "timestamp": "2026-09-17T14:12:00Z",
+      "service": "email-service",
+      "level": "ERROR",
+      "message": "Request failed status=502 cause=UpstreamAuthenticationFailed for mail-relay"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-12T14:00:00Z",
+      "service": "email-service",
+      "version": "0.0.1-old",
+      "commit": "3324da6",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-17T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "406b9c8",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-306",
+      "title": "Authentication failures to an upstream",
+      "content": "Possible causes: rotated or revoked credentials, clock skew, permission changes, expired tokens. Check when the failures started and whether any secret or permission changed at that time."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "Secret mail-relay-password was rotated but email-service kept using its cached old credential, so mail-relay answers 401",
+    "keywords": [
+      "rotat",
+      "credential|secret|api key|token|password",
+      "401|unauthorized|authenticat"
+    ],
+    "must_have": [
+      "mail-relay-password|secrets-manager|rotation-job|cached|stale|old credential"
+    ],
+    "category": "credential_rotation",
+    "culprit_references": [
+      "Secret mail-relay-password rotated",
+      "mail-relay returned 401 Unauthorized: invalid credentials"
+    ]
+  }
+}

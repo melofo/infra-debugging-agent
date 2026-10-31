@@ -45,6 +45,20 @@ the source runbook or incident.
 Do not use 1.0: you cannot be completely certain from logs alone.
 - Never invent data. If you lack information, say so in the summary."""
 
+# 第二版提示词（实验中）：在原来的基础上，多一段"不要只看发布"的通用方法。
+# 它来自评估的发现：模型很擅长"找出是哪次发布出的问题"，但发布不能解释症状时，它不会去查别的服务里记录的
+# 配置、开关、密钥变更。这段话是通用的排查原则，没有提到评估里的任何具体场景。
+# 是否采用，要看评估数据（开发集和从未调过的留出集都变好才算），所以默认仍然是 SYSTEM_PROMPT。
+SYSTEM_PROMPT_V2 = SYSTEM_PROMPT + """
+
+Beyond deploys:
+Not every incident is caused by a deploy. If the recent deploys of the affected service do not explain \
+the symptoms, look for other kinds of change: configuration, feature flags, credentials and secrets, \
+certificates, infrastructure and traffic. Such changes are often logged by a \
+different service than the one that is failing, so call list_services to see what exists and search the \
+logs of the services that look related. Do not stop at the first error message: ask what changed just \
+before it started, and prefer the change over its symptom as the root cause."""
+
 SUBMIT_TOOL_NAME = "submit_rca_report"
 
 

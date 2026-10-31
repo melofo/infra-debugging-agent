@@ -1,0 +1,254 @@
+[
+  {
+    "scenario": "bug-2001",
+    "category": "connection_pool_exhaustion",
+    "difficulty": "easy",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2002",
+    "category": "code_regression",
+    "difficulty": "easy",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2003",
+    "category": "memory_leak",
+    "difficulty": "easy",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2004",
+    "category": "slow_dependency",
+    "difficulty": "easy",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2005",
+    "category": "expired_certificate",
+    "difficulty": "easy",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2006",
+    "category": "log_volume_disk_full",
+    "difficulty": "easy",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2007",
+    "category": "credential_rotation",
+    "difficulty": "easy",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2008",
+    "category": "traffic_spike",
+    "difficulty": "easy",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2009",
+    "category": "missing_index",
+    "difficulty": "easy",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2010",
+    "category": "feature_flag_change",
+    "difficulty": "easy",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2011",
+    "category": "connection_pool_exhaustion",
+    "difficulty": "medium",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2012",
+    "category": "code_regression",
+    "difficulty": "medium",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2013",
+    "category": "memory_leak",
+    "difficulty": "medium",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2014",
+    "category": "slow_dependency",
+    "difficulty": "medium",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2015",
+    "category": "expired_certificate",
+    "difficulty": "medium",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2016",
+    "category": "log_volume_disk_full",
+    "difficulty": "medium",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2017",
+    "category": "credential_rotation",
+    "difficulty": "medium",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2018",
+    "category": "traffic_spike",
+    "difficulty": "medium",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2019",
+    "category": "missing_index",
+    "difficulty": "medium",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2020",
+    "category": "feature_flag_change",
+    "difficulty": "medium",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2021",
+    "category": "connection_pool_exhaustion",
+    "difficulty": "hard",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2022",
+    "category": "code_regression",
+    "difficulty": "hard",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2023",
+    "category": "memory_leak",
+    "difficulty": "hard",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2024",
+    "category": "slow_dependency",
+    "difficulty": "hard",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2025",
+    "category": "expired_certificate",
+    "difficulty": "hard",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2026",
+    "category": "log_volume_disk_full",
+    "difficulty": "hard",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2027",
+    "category": "credential_rotation",
+    "difficulty": "hard",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2028",
+    "category": "traffic_spike",
+    "difficulty": "hard",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2029",
+    "category": "missing_index",
+    "difficulty": "hard",
+    "has_culprit_deploy": true,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2030",
+    "category": "feature_flag_change",
+    "difficulty": "hard",
+    "has_culprit_deploy": false,
+    "split": "dev"
+  },
+  {
+    "scenario": "bug-2031",
+    "category": "autoscaler_limit_lowered",
+    "difficulty": "medium",
+    "has_culprit_deploy": false,
+    "split": "holdout"
+  },
+  {
+    "scenario": "bug-2032",
+    "category": "autoscaler_limit_lowered",
+    "difficulty": "hard",
+    "has_culprit_deploy": false,
+    "split": "holdout"
+  },
+  {
+    "scenario": "bug-2033",
+    "category": "dns_record_changed",
+    "difficulty": "medium",
+    "has_culprit_deploy": false,
+    "split": "holdout"
+  },
+  {
+    "scenario": "bug-2034",
+    "category": "dns_record_changed",
+    "difficulty": "hard",
+    "has_culprit_deploy": false,
+    "split": "holdout"
+  },
+  {
+    "scenario": "bug-2035",
+    "category": "network_policy_blocked",
+    "difficulty": "medium",
+    "has_culprit_deploy": false,
+    "split": "holdout"
+  },
+  {
+    "scenario": "bug-2036",
+    "category": "network_policy_blocked",
+    "difficulty": "hard",
+    "has_culprit_deploy": false,
+    "split": "holdout"
+  }
+]

@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # 调查工具的白名单：MCP 服务端就算还提供了别的工具，Agent 也看不到、调不了。
 INVESTIGATION_TOOLS = frozenset(
-    {"get_ticket", "search_logs", "get_recent_deploys", "search_runbooks", "search_knowledge"}
+    {"get_ticket", "search_logs", "get_recent_deploys", "search_runbooks", "search_knowledge", "list_services"}
 )
 
 MAX_LIST_PAGES = 5

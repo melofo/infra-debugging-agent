@@ -1,0 +1,161 @@
+{
+  "ticket": {
+    "id": "BUG-2022",
+    "title": "pricing-api fails for some orders after this afternoon",
+    "description": "Support reports that a subset of customers cannot complete their purchase. Others are fine.",
+    "service": "pricing-api",
+    "severity": "high",
+    "reported_at": "2026-09-22T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-22T13:35:00Z",
+      "service": "pricing-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88147 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-22T13:46:00Z",
+      "service": "pricing-api",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-22T13:51:00Z",
+      "service": "pricing-api",
+      "level": "WARN",
+      "message": "Retrying idempotent call attempt=2"
+    },
+    {
+      "timestamp": "2026-09-22T13:54:00Z",
+      "service": "pricing-api",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-22T14:01:00Z",
+      "service": "pricing-api",
+      "level": "ERROR",
+      "message": "Unhandled exception in GET /price: java.lang.NullPointerException: Cannot invoke \"com.acme.TaxTable.rate()\" because \"table\" is null"
+    },
+    {
+      "timestamp": "2026-09-22T14:01:00Z",
+      "service": "pricing-api",
+      "level": "ERROR",
+      "message": "\tat com.acme.pricingapi.TaxCalculator.apply(TaxCalculator.java:141)"
+    },
+    {
+      "timestamp": "2026-09-22T14:04:00Z",
+      "service": "pricing-api",
+      "level": "ERROR",
+      "message": "Request failed status=500 cause=NullPointerException in TaxCalculator"
+    },
+    {
+      "timestamp": "2026-09-22T14:04:00Z",
+      "service": "pricing-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88247 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-22T14:05:00Z",
+      "service": "pricing-api",
+      "level": "WARN",
+      "message": "Deprecated API v1 endpoint called by legacy client"
+    },
+    {
+      "timestamp": "2026-09-22T14:07:00Z",
+      "service": "pricing-api",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-22T14:08:00Z",
+      "service": "pricing-api",
+      "level": "WARN",
+      "message": "Request with a shipping address outside the EU failed; requests without it succeeded"
+    },
+    {
+      "timestamp": "2026-09-22T14:11:00Z",
+      "service": "pricing-api",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9921 amount=42.10"
+    },
+    {
+      "timestamp": "2026-09-22T14:12:00Z",
+      "service": "pricing-api",
+      "level": "ERROR",
+      "message": "Unhandled exception in GET /price: java.lang.NullPointerException in TaxCalculator.apply"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-22T13:52:00Z",
+      "service": "pricing-api",
+      "version": "5.0.3",
+      "commit": "f7d4f37",
+      "author": "kpatel",
+      "summary": "Refactor tax calculation",
+      "diff_summary": "TaxCalculator.java: tax table lookup refactored"
+    },
+    {
+      "timestamp": "2026-09-17T14:00:00Z",
+      "service": "pricing-api",
+      "version": "0.0.1-old",
+      "commit": "c8c514e",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-22T13:55:00Z",
+      "service": "pricing-api",
+      "version": "99.0.0-docs",
+      "commit": "1eadae3",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    },
+    {
+      "timestamp": "2026-09-22T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "8d5d34b",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-301",
+      "title": "Errors affecting only some requests",
+      "content": "Possible causes: a code regression in a recent release, bad input from one client, a feature flag, data-dependent bugs. Compare failing and succeeding requests, check the stack trace and the latest release notes."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "Release 5.0.3 introduced a null pointer bug in TaxCalculator: requests containing a shipping address outside the EU hit an unchecked null",
+    "keywords": [
+      "nullpointerexception|null pointer",
+      "taxcalculator",
+      "5.0.3|f7d4f37"
+    ],
+    "must_have": [
+      "taxcalculator|5.0.3|f7d4f37"
+    ],
+    "category": "code_regression",
+    "culprit_references": [
+      "f7d4f37",
+      "NullPointerException"
+    ]
+  }
+}

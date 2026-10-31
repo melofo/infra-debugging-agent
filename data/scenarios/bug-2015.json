@@ -1,0 +1,143 @@
+{
+  "ticket": {
+    "id": "BUG-2015",
+    "title": "notification-worker cannot reach sms-provider since midnight UTC",
+    "description": "All calls from this service to sms-provider fail. Nothing was released recently.",
+    "service": "notification-worker",
+    "severity": "high",
+    "reported_at": "2026-09-15T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-15T13:35:00Z",
+      "service": "notification-worker",
+      "level": "INFO",
+      "message": "Order placed order_id=88098 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-15T13:46:00Z",
+      "service": "notification-worker",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-15T13:51:00Z",
+      "service": "notification-worker",
+      "level": "WARN",
+      "message": "Retrying idempotent call attempt=2"
+    },
+    {
+      "timestamp": "2026-09-15T13:54:00Z",
+      "service": "notification-worker",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-15T13:57:00Z",
+      "service": "notification-worker",
+      "level": "INFO",
+      "message": "Connected to sms-provider (tls)"
+    },
+    {
+      "timestamp": "2026-09-15T14:00:00Z",
+      "service": "notification-worker",
+      "level": "ERROR",
+      "message": "javax.net.ssl.SSLHandshakeException: PKIX path validation failed: java.security.cert.CertPathValidatorException: validity check failed"
+    },
+    {
+      "timestamp": "2026-09-15T14:00:00Z",
+      "service": "notification-worker",
+      "level": "ERROR",
+      "message": "Certificate for sms-provider expired on 2026-09-01T00:00:00Z (NotAfter=2026-09-01T00:00:00Z)"
+    },
+    {
+      "timestamp": "2026-09-15T14:04:00Z",
+      "service": "notification-worker",
+      "level": "INFO",
+      "message": "Order placed order_id=88198 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-15T14:05:00Z",
+      "service": "notification-worker",
+      "level": "ERROR",
+      "message": "Request to sms-provider failed: SSL handshake failure"
+    },
+    {
+      "timestamp": "2026-09-15T14:05:00Z",
+      "service": "notification-worker",
+      "level": "WARN",
+      "message": "Deprecated API v1 endpoint called by legacy client"
+    },
+    {
+      "timestamp": "2026-09-15T14:07:00Z",
+      "service": "notification-worker",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-15T14:11:00Z",
+      "service": "notification-worker",
+      "level": "ERROR",
+      "message": "Request to sms-provider failed: SSL handshake failure"
+    },
+    {
+      "timestamp": "2026-09-15T14:11:00Z",
+      "service": "notification-worker",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9914 amount=42.10"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-10T14:00:00Z",
+      "service": "notification-worker",
+      "version": "0.0.1-old",
+      "commit": "0958e10",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-15T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "cea0cb8",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-304",
+      "title": "Connection failures to an upstream service",
+      "content": "Possible causes: expired or untrusted certificates, DNS problems, firewall changes, the upstream being down. Check the error type: handshake errors point to certificates, connection refused points to the network."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "The TLS certificate used for sms-provider expired on 2026-09-01T00:00:00Z, so every handshake fails",
+    "keywords": [
+      "certificate|cert ",
+      "expired|expiry|expire",
+      "tls|ssl|handshake"
+    ],
+    "must_have": [
+      "2026-09-01|notafter|not after|expired on|expiry date|expiration date"
+    ],
+    "category": "expired_certificate",
+    "culprit_references": [
+      "Certificate for sms-provider expired on 2026-09-01T00:00:00Z",
+      "SSLHandshakeException"
+    ]
+  }
+}

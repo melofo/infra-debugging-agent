@@ -1,0 +1,140 @@
+{
+  "ticket": {
+    "id": "BUG-2006",
+    "title": "auth-service nodes report errors writing files and then crash",
+    "description": "Several instances became unhealthy within an hour. Disk alerts fired on the hosts.",
+    "service": "auth-service",
+    "severity": "medium",
+    "reported_at": "2026-09-06T14:29:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-06T13:35:00Z",
+      "service": "auth-service",
+      "level": "INFO",
+      "message": "Order placed order_id=88035 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-06T13:46:00Z",
+      "service": "auth-service",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-06T13:54:00Z",
+      "service": "auth-service",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-06T14:00:00Z",
+      "service": "auth-service",
+      "level": "INFO",
+      "message": "Application started version=8.4.0 log.level=DEBUG"
+    },
+    {
+      "timestamp": "2026-09-06T14:04:00Z",
+      "service": "auth-service",
+      "level": "INFO",
+      "message": "Order placed order_id=88135 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-06T14:07:00Z",
+      "service": "auth-service",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-06T14:10:00Z",
+      "service": "auth-service",
+      "level": "WARN",
+      "message": "Disk usage 87% on /var/log"
+    },
+    {
+      "timestamp": "2026-09-06T14:11:00Z",
+      "service": "auth-service",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9905 amount=42.10"
+    },
+    {
+      "timestamp": "2026-09-06T14:24:00Z",
+      "service": "auth-service",
+      "level": "ERROR",
+      "message": "java.io.IOException: No space left on device"
+    },
+    {
+      "timestamp": "2026-09-06T14:25:00Z",
+      "service": "auth-service",
+      "level": "ERROR",
+      "message": "Failed to write to /var/log/app/app.log: No space left on device"
+    },
+    {
+      "timestamp": "2026-09-06T14:27:00Z",
+      "service": "auth-service",
+      "level": "ERROR",
+      "message": "Health check failed: cannot write temp file"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-06T13:30:00Z",
+      "service": "auth-service",
+      "version": "8.4.0",
+      "commit": "eb19fca",
+      "author": "kpatel",
+      "summary": "Improve troubleshooting output",
+      "diff_summary": "logback.xml: root level INFO -> DEBUG"
+    },
+    {
+      "timestamp": "2026-09-01T14:00:00Z",
+      "service": "auth-service",
+      "version": "0.0.1-old",
+      "commit": "935312d",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-06T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "923b5b2",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-305",
+      "title": "Disk space alerts and write failures",
+      "content": "Possible causes: runaway log volume, large temp files, a stuck log rotation, data growth. Check which directory grew, the log level, and whether rotation is working."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "Release 8.4.0 switched the log level from INFO to DEBUG, log files filled the disk and writes began to fail",
+    "keywords": [
+      "debug",
+      "log level|logging|log volume|verbose",
+      "disk|space"
+    ],
+    "must_have": [
+      "debug|eb19fca"
+    ],
+    "category": "log_volume_disk_full",
+    "culprit_references": [
+      "eb19fca",
+      "No space left on device"
+    ]
+  }
+}

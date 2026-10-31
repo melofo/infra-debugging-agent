@@ -1,0 +1,161 @@
+{
+  "ticket": {
+    "id": "BUG-2029",
+    "title": "invoice-api responses became very slow after this morning",
+    "description": "Latency went from about 100ms to over 8 seconds. Error rate is only slightly higher.",
+    "service": "invoice-api",
+    "severity": "high",
+    "reported_at": "2026-09-29T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-29T13:35:00Z",
+      "service": "invoice-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88196 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-29T13:46:00Z",
+      "service": "invoice-api",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-29T13:51:00Z",
+      "service": "invoice-api",
+      "level": "WARN",
+      "message": "Retrying idempotent call attempt=2"
+    },
+    {
+      "timestamp": "2026-09-29T13:54:00Z",
+      "service": "invoice-api",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-29T14:03:00Z",
+      "service": "invoice-api",
+      "level": "WARN",
+      "message": "Slow query 8200ms: SELECT * FROM invoices WHERE account_id = ?"
+    },
+    {
+      "timestamp": "2026-09-29T14:04:00Z",
+      "service": "invoice-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88296 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-29T14:05:00Z",
+      "service": "invoice-api",
+      "level": "WARN",
+      "message": "Slow query 9100ms: SELECT * FROM invoices WHERE account_id = ?"
+    },
+    {
+      "timestamp": "2026-09-29T14:05:00Z",
+      "service": "invoice-api",
+      "level": "WARN",
+      "message": "Deprecated API v1 endpoint called by legacy client"
+    },
+    {
+      "timestamp": "2026-09-29T14:07:00Z",
+      "service": "database",
+      "level": "WARN",
+      "message": "Sequential scan on invoices rows=4200000 filter=account_id"
+    },
+    {
+      "timestamp": "2026-09-29T14:07:00Z",
+      "service": "invoice-api",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-29T14:10:00Z",
+      "service": "invoice-api",
+      "level": "ERROR",
+      "message": "Request timed out after 10000ms waiting for query"
+    },
+    {
+      "timestamp": "2026-09-29T14:11:00Z",
+      "service": "invoice-api",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9928 amount=42.10"
+    },
+    {
+      "timestamp": "2026-09-29T14:13:00Z",
+      "service": "invoice-api",
+      "level": "WARN",
+      "message": "Slow query 11000ms: SELECT * FROM invoices WHERE account_id = ?"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-29T13:40:00Z",
+      "service": "invoice-api",
+      "version": "1.12.0",
+      "commit": "e5da54e",
+      "author": "kpatel",
+      "summary": "Clean up unused database objects",
+      "diff_summary": "V23__drop_unused.sql: DROP INDEX idx_invoices_account_id"
+    },
+    {
+      "timestamp": "2026-09-24T14:00:00Z",
+      "service": "invoice-api",
+      "version": "0.0.1-old",
+      "commit": "8c0c691",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-29T13:43:00Z",
+      "service": "invoice-api",
+      "version": "99.0.0-docs",
+      "commit": "9631391",
+      "author": "mchen",
+      "summary": "Update copyright year in footer",
+      "diff_summary": "templates/footer.html: 1 line changed"
+    },
+    {
+      "timestamp": "2026-09-29T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "4f5a93a",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-308",
+      "title": "Slow responses with database queries",
+      "content": "Possible causes: a missing or dropped index, lock contention, table growth, a bad query plan, an overloaded database. Inspect slow query logs and query plans and check recent schema migrations."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "Migration V23__drop_unused dropped the index on invoices.account_id, so lookups do full table scans",
+    "keywords": [
+      "index",
+      "migration|schema|dropp|removed|missing index",
+      "account_id"
+    ],
+    "must_have": [
+      "account_id|v23__drop_unused|sequential scan|seq scan|full table scan|full scan|e5da54e"
+    ],
+    "category": "missing_index",
+    "culprit_references": [
+      "e5da54e",
+      "Sequential scan on invoices"
+    ]
+  }
+}

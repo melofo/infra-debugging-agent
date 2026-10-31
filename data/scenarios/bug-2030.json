@@ -1,0 +1,152 @@
+{
+  "ticket": {
+    "id": "BUG-2030",
+    "title": "search-api errors for customers in some countries",
+    "description": "Only some customers see failures, mostly outside the main market. No release happened today.",
+    "service": "search-api",
+    "severity": "high",
+    "reported_at": "2026-09-30T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-30T13:35:00Z",
+      "service": "search-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88203 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-30T13:46:00Z",
+      "service": "search-api",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-30T13:51:00Z",
+      "service": "search-api",
+      "level": "WARN",
+      "message": "Retrying idempotent call attempt=2"
+    },
+    {
+      "timestamp": "2026-09-30T13:54:00Z",
+      "service": "search-api",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-30T13:58:00Z",
+      "service": "config-service",
+      "level": "INFO",
+      "message": "Feature flag semantic-ranking enabled for 100% of traffic by user=ops-bot"
+    },
+    {
+      "timestamp": "2026-09-30T14:01:00Z",
+      "service": "search-api",
+      "level": "ERROR",
+      "message": "SemanticRanker failed: empty embedding for non-latin queries"
+    },
+    {
+      "timestamp": "2026-09-30T14:03:00Z",
+      "service": "search-api",
+      "level": "ERROR",
+      "message": "Request failed status=500 cause=SemanticRankerException"
+    },
+    {
+      "timestamp": "2026-09-30T14:04:00Z",
+      "service": "search-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88303 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-30T14:05:00Z",
+      "service": "search-api",
+      "level": "WARN",
+      "message": "Deprecated API v1 endpoint called by legacy client"
+    },
+    {
+      "timestamp": "2026-09-30T14:06:00Z",
+      "service": "search-api",
+      "level": "ERROR",
+      "message": "SemanticRanker failed: empty embedding for non-latin queries"
+    },
+    {
+      "timestamp": "2026-09-30T14:07:00Z",
+      "service": "search-api",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-30T14:09:00Z",
+      "service": "search-api",
+      "level": "WARN",
+      "message": "Fallback path disabled by flag semantic-ranking"
+    },
+    {
+      "timestamp": "2026-09-30T14:11:00Z",
+      "service": "search-api",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9929 amount=42.10"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-25T14:00:00Z",
+      "service": "search-api",
+      "version": "0.0.1-old",
+      "commit": "6f68fa2",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-30T13:57:00Z",
+      "service": "search-api",
+      "version": "99.0.0-docs",
+      "commit": "ccac875",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    },
+    {
+      "timestamp": "2026-09-30T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "c0d2b57",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-309",
+      "title": "Errors affecting a subset of customers",
+      "content": "Possible causes: a feature flag or experiment change, region-specific data, a partial rollout of a release, a dependency that is unhealthy in one region. Check the flag audit log and compare affected and unaffected customers."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "Feature flag semantic-ranking was switched on for all traffic and routes requests through SemanticRanker, which fails for empty embedding for non-latin queries",
+    "keywords": [
+      "feature flag|flag",
+      "semantic-ranking",
+      "semanticranker"
+    ],
+    "must_have": [
+      "semantic-ranking|semanticranker"
+    ],
+    "category": "feature_flag_change",
+    "culprit_references": [
+      "Feature flag semantic-ranking enabled for 100% of traffic",
+      "SemanticRanker failed: empty embedding for non-latin queries"
+    ]
+  }
+}

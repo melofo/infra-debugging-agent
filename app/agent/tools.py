@@ -127,6 +127,10 @@ class GetRecentDeploysArgs(BaseModel):
     limit: int = Field(default=5, ge=1, le=20, description="Max deploys to return, newest first")
 
 
+class ListServicesArgs(BaseModel):
+    """没有参数：列出所有服务。"""
+
+
 class SearchRunbooksArgs(BaseModel):
     query: str = Field(description="Keywords describing the symptom, e.g. 'connection pool timeout'")
 
@@ -146,12 +150,17 @@ class SearchKnowledgeArgs(BaseModel):
     limit: int = Field(default=5, ge=1, le=8, description="Max results (1-8)")
 
 
-def build_investigation_tools(scenario: Scenario, knowledge: KnowledgeBase | None = None) -> ToolRegistry:
+def build_investigation_tools(
+    scenario: Scenario, knowledge: KnowledgeBase | None = None, service_discovery: bool = False
+) -> ToolRegistry:
     """为某个故障场景创建工具集。
 
     处理函数都定义在这个函数里面，用到了外层的 scenario 变量（闭包 closure，
     类似 Java 里的 lambda 捕获外部变量）。这样每个工具自然就"绑定"到这个场景的数据上。
     注意：这里只用了 ticket/logs/deploys/runbooks，从不碰 scenario.ground_truth。
+
+    service_discovery：是否提供 list_services（服务目录）。默认关闭，保持原来的行为；评估里用它做对照实验
+    （见 app/evals/agent_eval.py 的 AGENT_VARIANTS）：agent 是不是因为不知道还有哪些相关服务，才没去查它们的日志。
     """
 
     # 场景里出现过的所有服务名。模型有时会把服务名拼错（例如 payment-service 写成 payments-service 的变体），
@@ -166,6 +175,10 @@ def build_investigation_tools(scenario: Scenario, knowledge: KnowledgeBase | Non
     def require_known_service(service: str) -> None:
         if service not in known_services:
             raise ToolError(f"unknown service {service!r}; known services: {', '.join(known_services)}")
+
+    def list_services(args: ListServicesArgs) -> dict:
+        # 真实环境里对应服务目录 / CMDB / Kubernetes 的服务列表。只返回名字，不返回任何内容，所以不会泄露数据。
+        return {"services": known_services}
 
     def get_ticket(args: GetTicketArgs) -> dict:
         if args.ticket_id != scenario.ticket.id:
@@ -272,6 +285,18 @@ def build_investigation_tools(scenario: Scenario, knowledge: KnowledgeBase | Non
             handler=get_recent_deploys,
         ),
     ]
+    if service_discovery:
+        tools.append(
+            Tool(
+                name="list_services",
+                description=(
+                    "List the names of all services in this environment (applications, databases, configuration, "
+                    "secrets, networking and so on). Use it to find related services whose logs you can search."
+                ),
+                args_model=ListServicesArgs,
+                handler=list_services,
+            )
+        )
     if knowledge is not None:
         tools.append(
             Tool(

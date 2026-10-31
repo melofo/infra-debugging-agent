@@ -1,0 +1,143 @@
+{
+  "ticket": {
+    "id": "BUG-2031",
+    "title": "checkout-api is slow and returns errors during the evening peak",
+    "description": "Latency and errors rise every evening when traffic is highest. Nothing was released.",
+    "service": "checkout-api",
+    "severity": "high",
+    "reported_at": "2026-10-01T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-10-01T13:35:00Z",
+      "service": "checkout-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88210 total=42.10"
+    },
+    {
+      "timestamp": "2026-10-01T13:46:00Z",
+      "service": "checkout-api",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-10-01T13:51:00Z",
+      "service": "checkout-api",
+      "level": "WARN",
+      "message": "Retrying idempotent call attempt=2"
+    },
+    {
+      "timestamp": "2026-10-01T13:54:00Z",
+      "service": "checkout-api",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-10-01T13:57:00Z",
+      "service": "autoscaler",
+      "level": "INFO",
+      "message": "HPA checkout-api maxReplicas changed 12 -> 2 by user=ops-bot"
+    },
+    {
+      "timestamp": "2026-10-01T14:04:00Z",
+      "service": "checkout-api",
+      "level": "WARN",
+      "message": "CPU usage 97% on all instances"
+    },
+    {
+      "timestamp": "2026-10-01T14:04:00Z",
+      "service": "checkout-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88310 total=15.00"
+    },
+    {
+      "timestamp": "2026-10-01T14:05:00Z",
+      "service": "checkout-api",
+      "level": "WARN",
+      "message": "Deprecated API v1 endpoint called by legacy client"
+    },
+    {
+      "timestamp": "2026-10-01T14:06:00Z",
+      "service": "checkout-api",
+      "level": "ERROR",
+      "message": "no healthy upstream: all instances saturated"
+    },
+    {
+      "timestamp": "2026-10-01T14:07:00Z",
+      "service": "checkout-api",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-10-01T14:09:00Z",
+      "service": "checkout-api",
+      "level": "ERROR",
+      "message": "Request failed status=503 cause=UpstreamOverloaded"
+    },
+    {
+      "timestamp": "2026-10-01T14:11:00Z",
+      "service": "checkout-api",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9930 amount=42.10"
+    },
+    {
+      "timestamp": "2026-10-01T14:12:00Z",
+      "service": "autoscaler",
+      "level": "WARN",
+      "message": "HPA checkout-api wants 12 replicas but is capped at 2"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-26T14:00:00Z",
+      "service": "checkout-api",
+      "version": "0.0.1-old",
+      "commit": "9b764b5",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-10-01T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "826f9b9",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-310",
+      "title": "Slow responses and errors at peak hours",
+      "content": "Possible causes: traffic growth, a slow dependency, noisy neighbours on the node, insufficient capacity, resource limits set too low. Compare CPU and latency with the baseline and check recent configuration changes."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "The autoscaler limit for checkout-api was lowered from 12 to 2 replicas, so it cannot scale out during the evening peak and instances saturate",
+    "keywords": [
+      "autoscal|replica|hpa|scaling",
+      "limit|cap|maxreplicas|lowered|reduced|changed",
+      "cpu|saturat|capacity|overload"
+    ],
+    "must_have": [
+      "maxreplicas|replicas|hpa|autoscaler"
+    ],
+    "category": "autoscaler_limit_lowered",
+    "culprit_references": [
+      "HPA checkout-api maxReplicas changed 12 -> 2",
+      "CPU usage 97% on all instances"
+    ]
+  }
+}

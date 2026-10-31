@@ -1,0 +1,131 @@
+{
+  "ticket": {
+    "id": "BUG-2005",
+    "title": "payments-api cannot reach bank-partner-gateway since midnight UTC",
+    "description": "All calls from this service to bank-partner-gateway fail. Nothing was released recently.",
+    "service": "payments-api",
+    "severity": "medium",
+    "reported_at": "2026-09-05T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-05T13:35:00Z",
+      "service": "payments-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88028 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-05T13:46:00Z",
+      "service": "payments-api",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-05T13:54:00Z",
+      "service": "payments-api",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-05T13:57:00Z",
+      "service": "payments-api",
+      "level": "INFO",
+      "message": "Connected to bank-partner-gateway (tls)"
+    },
+    {
+      "timestamp": "2026-09-05T14:00:00Z",
+      "service": "payments-api",
+      "level": "ERROR",
+      "message": "javax.net.ssl.SSLHandshakeException: PKIX path validation failed: java.security.cert.CertPathValidatorException: validity check failed"
+    },
+    {
+      "timestamp": "2026-09-05T14:00:00Z",
+      "service": "payments-api",
+      "level": "ERROR",
+      "message": "Certificate for bank-partner-gateway expired on 2026-08-31T23:59:59Z (NotAfter=2026-08-31T23:59:59Z)"
+    },
+    {
+      "timestamp": "2026-09-05T14:04:00Z",
+      "service": "payments-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88128 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-05T14:05:00Z",
+      "service": "payments-api",
+      "level": "ERROR",
+      "message": "Request to bank-partner-gateway failed: SSL handshake failure"
+    },
+    {
+      "timestamp": "2026-09-05T14:07:00Z",
+      "service": "payments-api",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-05T14:11:00Z",
+      "service": "payments-api",
+      "level": "ERROR",
+      "message": "Request to bank-partner-gateway failed: SSL handshake failure"
+    },
+    {
+      "timestamp": "2026-09-05T14:11:00Z",
+      "service": "payments-api",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9904 amount=42.10"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-08-31T14:00:00Z",
+      "service": "payments-api",
+      "version": "0.0.1-old",
+      "commit": "ead7b4f",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-05T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "910ea6d",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-304",
+      "title": "Connection failures to an upstream service",
+      "content": "Possible causes: expired or untrusted certificates, DNS problems, firewall changes, the upstream being down. Check the error type: handshake errors point to certificates, connection refused points to the network."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "The TLS certificate used for bank-partner-gateway expired on 2026-08-31T23:59:59Z, so every handshake fails",
+    "keywords": [
+      "certificate|cert ",
+      "expired|expiry|expire",
+      "tls|ssl|handshake"
+    ],
+    "must_have": [
+      "2026-08-31|notafter|not after|expired on|expiry date|expiration date"
+    ],
+    "category": "expired_certificate",
+    "culprit_references": [
+      "Certificate for bank-partner-gateway expired on 2026-08-31T23:59:59Z",
+      "SSLHandshakeException"
+    ]
+  }
+}

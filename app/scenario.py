@@ -51,7 +51,17 @@ class GroundTruth(BaseModel):
     """标准答案，只给评估用，绝不能暴露给 Agent 或它的工具。"""
 
     root_cause: str
+    # 关键词按"概念组"写：每一项是一个概念，用 | 分隔同义写法（任意一个出现就算这个概念出现）。
+    # 评分时，假设里命中至少 2 个概念才算判对（只有 1 个概念的话要全中）。见 app/evals/scoring.py。
     keywords: list[str]
+    # 必须出现的"本次事故特有的事实"（版本号、配置项名、依赖名、功能开关名……），每一项也是 | 分隔的同义写法。
+    # 为什么需要它：runbook 会列出好几种可能的原因，把 runbook 原文整段抄一遍，就能命中很多概念关键词，
+    # 但那不是诊断。特有的事实只存在于这次事故的数据里，抄 runbook 抄不出来，必须真的读过日志和发布记录。
+    must_have: list[str] = []
+    # 以下是评估用的补充信息（默认值让旧的场景文件不用改）：
+    category: str = ""  # 根因的类别，用来分组统计（哪一类故障 agent 最容易判错）
+    # 一份好报告应该引用的"关键出处"：真正的元凶 commit，或者最能说明问题的那条日志里的一段原文。
+    culprit_references: list[str] = []
 
 
 class Scenario(BaseModel):

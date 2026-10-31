@@ -1,0 +1,161 @@
+{
+  "ticket": {
+    "id": "BUG-2021",
+    "title": "profile-api intermittently returns HTTP 500",
+    "description": "Customers report random failures that started around 2pm UTC. Retrying sometimes works.",
+    "service": "profile-api",
+    "severity": "high",
+    "reported_at": "2026-09-21T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-21T13:35:00Z",
+      "service": "profile-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88140 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-21T13:46:00Z",
+      "service": "profile-api",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-21T13:51:00Z",
+      "service": "profile-api",
+      "level": "WARN",
+      "message": "Retrying idempotent call attempt=2"
+    },
+    {
+      "timestamp": "2026-09-21T13:54:00Z",
+      "service": "profile-api",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-21T13:58:00Z",
+      "service": "profile-api",
+      "level": "INFO",
+      "message": "Application started version=7.2.0 datasource.maxActive=2"
+    },
+    {
+      "timestamp": "2026-09-21T14:02:00Z",
+      "service": "profile-api",
+      "level": "ERROR",
+      "message": "TomcatPool - Connection is not available, request timed out after 30000ms (total=2, active=2, idle=0, waiting=30)"
+    },
+    {
+      "timestamp": "2026-09-21T14:03:00Z",
+      "service": "profile-api",
+      "level": "ERROR",
+      "message": "Request failed status=500 cause=SQLTransientConnectionException"
+    },
+    {
+      "timestamp": "2026-09-21T14:04:00Z",
+      "service": "profile-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88240 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-21T14:05:00Z",
+      "service": "profile-api",
+      "level": "WARN",
+      "message": "Deprecated API v1 endpoint called by legacy client"
+    },
+    {
+      "timestamp": "2026-09-21T14:07:00Z",
+      "service": "profile-api",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-21T14:09:00Z",
+      "service": "profile-api",
+      "level": "ERROR",
+      "message": "TomcatPool - Connection is not available, request timed out after 30000ms (total=2, active=2, idle=0, waiting=41)"
+    },
+    {
+      "timestamp": "2026-09-21T14:10:00Z",
+      "service": "profile-api",
+      "level": "ERROR",
+      "message": "Request failed status=500 cause=SQLTransientConnectionException"
+    },
+    {
+      "timestamp": "2026-09-21T14:11:00Z",
+      "service": "profile-api",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9920 amount=42.10"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-21T13:55:00Z",
+      "service": "profile-api",
+      "version": "7.2.0",
+      "commit": "269cee3",
+      "author": "kpatel",
+      "summary": "Reduce idle database connection cost",
+      "diff_summary": "application.yml: datasource.maxActive 25 -> 2"
+    },
+    {
+      "timestamp": "2026-09-16T14:00:00Z",
+      "service": "profile-api",
+      "version": "0.0.1-old",
+      "commit": "cd935b8",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-21T13:58:00Z",
+      "service": "profile-api",
+      "version": "99.0.0-docs",
+      "commit": "e861eb1",
+      "author": "mchen",
+      "summary": "Update copyright year in footer",
+      "diff_summary": "templates/footer.html: 1 line changed"
+    },
+    {
+      "timestamp": "2026-09-21T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "cba0a3c",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-300",
+      "title": "Intermittent 5xx with database errors",
+      "content": "Possible causes: connection pool too small for the traffic, long-running transactions holding connections, database failover, network problems between the service and the database. Check pool metrics, recent configuration changes and database health."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "Deploy 7.2.0 reduced the database connection pool (datasource.maxActive) from 25 to 2, so the pool is exhausted under normal load",
+    "keywords": [
+      "connection pool|pool size|pool exhaust",
+      "maxactive|pool size|maximum size|max size|pool max",
+      "7.2.0|269cee3"
+    ],
+    "must_have": [
+      "maxactive|pool size|maximum size|max size|7.2.0|269cee3"
+    ],
+    "category": "connection_pool_exhaustion",
+    "culprit_references": [
+      "269cee3",
+      "Connection is not available, request timed out after 30000ms"
+    ]
+  }
+}

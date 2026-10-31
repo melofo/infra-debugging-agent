@@ -1,0 +1,143 @@
+{
+  "ticket": {
+    "id": "BUG-2033",
+    "title": "orders-api cannot reach one of its backends since the afternoon",
+    "description": "Calls to a backend system started timing out at about 2pm UTC for every request. No release happened.",
+    "service": "orders-api",
+    "severity": "high",
+    "reported_at": "2026-10-03T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-10-03T13:35:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88224 total=42.10"
+    },
+    {
+      "timestamp": "2026-10-03T13:46:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-10-03T13:51:00Z",
+      "service": "orders-api",
+      "level": "WARN",
+      "message": "Retrying idempotent call attempt=2"
+    },
+    {
+      "timestamp": "2026-10-03T13:54:00Z",
+      "service": "orders-api",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-10-03T13:58:00Z",
+      "service": "dns-service",
+      "level": "INFO",
+      "message": "Record orders-db.internal A changed 10.2.0.5 -> 10.9.9.9 by terraform-apply"
+    },
+    {
+      "timestamp": "2026-10-03T14:01:00Z",
+      "service": "orders-api",
+      "level": "ERROR",
+      "message": "Connect to orders-db.internal (10.9.9.9) timed out after 3000ms"
+    },
+    {
+      "timestamp": "2026-10-03T14:03:00Z",
+      "service": "orders-api",
+      "level": "ERROR",
+      "message": "java.net.SocketTimeoutException: connect timed out"
+    },
+    {
+      "timestamp": "2026-10-03T14:04:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88324 total=15.00"
+    },
+    {
+      "timestamp": "2026-10-03T14:05:00Z",
+      "service": "orders-api",
+      "level": "WARN",
+      "message": "Deprecated API v1 endpoint called by legacy client"
+    },
+    {
+      "timestamp": "2026-10-03T14:07:00Z",
+      "service": "orders-api",
+      "level": "ERROR",
+      "message": "Connect to orders-db.internal (10.9.9.9) timed out after 3000ms"
+    },
+    {
+      "timestamp": "2026-10-03T14:07:00Z",
+      "service": "orders-api",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-10-03T14:10:00Z",
+      "service": "orders-api",
+      "level": "ERROR",
+      "message": "Request failed status=504 cause=BackendUnavailable"
+    },
+    {
+      "timestamp": "2026-10-03T14:11:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9932 amount=42.10"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-28T14:00:00Z",
+      "service": "orders-api",
+      "version": "0.0.1-old",
+      "commit": "bbfec23",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-10-03T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "c27f23a",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-311",
+      "title": "Timeouts when calling a backend",
+      "content": "Possible causes: the backend is down or overloaded, a firewall or routing change, a wrong address resolved for the backend, network congestion. Check where the connection attempts go and whether the backend itself is healthy."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "The DNS record for orders-db.internal was changed from 10.2.0.5 to 10.9.9.9 by a terraform apply, so orders-api connects to the wrong address and times out",
+    "keywords": [
+      "dns|record|a record|ip address",
+      "changed|updated|repointed|wrong|stale|new address",
+      "timed out|timeout|unreachable"
+    ],
+    "must_have": [
+      "10.9.9.9|terraform|orders-db.internal"
+    ],
+    "category": "dns_record_changed",
+    "culprit_references": [
+      "Record orders-db.internal A changed 10.2.0.5 -> 10.9.9.9",
+      "Connect to orders-db.internal (10.9.9.9) timed out"
+    ]
+  }
+}

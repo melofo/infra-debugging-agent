@@ -1,0 +1,152 @@
+{
+  "ticket": {
+    "id": "BUG-2036",
+    "title": "notification-worker cannot call sms-provider since 3pm",
+    "description": "Every call from this service to sms-provider fails. No release happened and sms-provider itself looks healthy.",
+    "service": "notification-worker",
+    "severity": "high",
+    "reported_at": "2026-10-06T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-10-06T13:35:00Z",
+      "service": "notification-worker",
+      "level": "INFO",
+      "message": "Order placed order_id=88245 total=42.10"
+    },
+    {
+      "timestamp": "2026-10-06T13:46:00Z",
+      "service": "notification-worker",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-10-06T13:51:00Z",
+      "service": "notification-worker",
+      "level": "WARN",
+      "message": "Retrying idempotent call attempt=2"
+    },
+    {
+      "timestamp": "2026-10-06T13:54:00Z",
+      "service": "notification-worker",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-10-06T13:58:00Z",
+      "service": "network-policy-controller",
+      "level": "INFO",
+      "message": "NetworkPolicy deny-egress-default applied to namespace notifications by user=sec-bot"
+    },
+    {
+      "timestamp": "2026-10-06T14:01:00Z",
+      "service": "notification-worker",
+      "level": "ERROR",
+      "message": "Connection to sms-provider:443 timed out (no route to host)"
+    },
+    {
+      "timestamp": "2026-10-06T14:04:00Z",
+      "service": "notification-worker",
+      "level": "ERROR",
+      "message": "Connection to sms-provider:443 timed out (no route to host)"
+    },
+    {
+      "timestamp": "2026-10-06T14:04:00Z",
+      "service": "notification-worker",
+      "level": "INFO",
+      "message": "Order placed order_id=88345 total=15.00"
+    },
+    {
+      "timestamp": "2026-10-06T14:05:00Z",
+      "service": "notification-worker",
+      "level": "WARN",
+      "message": "Deprecated API v1 endpoint called by legacy client"
+    },
+    {
+      "timestamp": "2026-10-06T14:07:00Z",
+      "service": "notification-worker",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-10-06T14:08:00Z",
+      "service": "notification-worker",
+      "level": "ERROR",
+      "message": "Request failed status=502 cause=UpstreamUnreachable for sms-provider"
+    },
+    {
+      "timestamp": "2026-10-06T14:11:00Z",
+      "service": "sms-provider",
+      "level": "INFO",
+      "message": "Health check ok, no inbound traffic from the last 10 minutes"
+    },
+    {
+      "timestamp": "2026-10-06T14:11:00Z",
+      "service": "notification-worker",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9935 amount=42.10"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-10-01T14:00:00Z",
+      "service": "notification-worker",
+      "version": "0.0.1-old",
+      "commit": "e0052b1",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-10-06T13:57:00Z",
+      "service": "notification-worker",
+      "version": "99.0.0-docs",
+      "commit": "280fbdb",
+      "author": "mchen",
+      "summary": "Update API documentation",
+      "diff_summary": "docs/openapi.yaml: description updates"
+    },
+    {
+      "timestamp": "2026-10-06T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "d9ed1ee",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-312",
+      "title": "Cannot reach an upstream service",
+      "content": "Possible causes: the upstream is down, DNS problems, certificate errors, routing or firewall changes, security group rules. Check whether the upstream is healthy and whether anything about connectivity changed recently."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "A default-deny egress NetworkPolicy was applied to namespace notifications, blocking notification-worker from reaching sms-provider",
+    "keywords": [
+      "network policy|networkpolicy|egress|firewall",
+      "deny|block|applied|restrict",
+      "timed out|timeout|unreachable|no route"
+    ],
+    "must_have": [
+      "deny-egress|networkpolicy|network policy|sec-bot|egress"
+    ],
+    "category": "network_policy_blocked",
+    "culprit_references": [
+      "NetworkPolicy deny-egress-default applied to namespace notifications",
+      "Connection to sms-provider:443 timed out"
+    ]
+  }
+}

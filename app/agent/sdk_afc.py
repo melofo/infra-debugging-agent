@@ -77,6 +77,11 @@ class SdkAfcAgent:
             """
             return await run("get_recent_deploys", {"service": service, "limit": limit})
 
+        async def list_services() -> dict:
+            """List the names of all services in this environment (applications, databases, configuration,
+            secrets, networking and so on). Use it to find related services whose logs you can search."""
+            return await run("list_services", {})
+
         async def search_runbooks(query: str) -> dict:
             """Search internal runbooks for known symptoms and recommended checks or mitigations.
 
@@ -134,6 +139,7 @@ class SdkAfcAgent:
                 get_ticket,
                 search_logs,
                 get_recent_deploys,
+                *([list_services] if "list_services" in self._registry.names() else []),
                 # 和手写版本保持同样的工具集：知识库可用时用语义检索，否则用关键词版的 runbook 检索。
                 search_knowledge if "search_knowledge" in self._registry.names() else search_runbooks,
                 submit_rca_report,

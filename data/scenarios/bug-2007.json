@@ -1,0 +1,137 @@
+{
+  "ticket": {
+    "id": "BUG-2007",
+    "title": "orders-api gets rejected by payments-api",
+    "description": "Requests from this service to payments-api started failing at about 1:05pm UTC. No release happened.",
+    "service": "orders-api",
+    "severity": "medium",
+    "reported_at": "2026-09-07T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-07T13:35:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88042 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-07T13:46:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-07T13:54:00Z",
+      "service": "orders-api",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-07T13:56:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Calling payments-api ok status=200"
+    },
+    {
+      "timestamp": "2026-09-07T14:00:00Z",
+      "service": "secrets-manager",
+      "level": "INFO",
+      "message": "Secret payments-api-key rotated version=7 by rotation-job"
+    },
+    {
+      "timestamp": "2026-09-07T14:01:00Z",
+      "service": "orders-api",
+      "level": "ERROR",
+      "message": "payments-api returned 401 Unauthorized: invalid credentials"
+    },
+    {
+      "timestamp": "2026-09-07T14:03:00Z",
+      "service": "orders-api",
+      "level": "ERROR",
+      "message": "payments-api returned 401 Unauthorized: invalid credentials"
+    },
+    {
+      "timestamp": "2026-09-07T14:04:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88142 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-07T14:07:00Z",
+      "service": "orders-api",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-07T14:08:00Z",
+      "service": "orders-api",
+      "level": "WARN",
+      "message": "Cached credential age=2h12m"
+    },
+    {
+      "timestamp": "2026-09-07T14:11:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9906 amount=42.10"
+    },
+    {
+      "timestamp": "2026-09-07T14:12:00Z",
+      "service": "orders-api",
+      "level": "ERROR",
+      "message": "Request failed status=502 cause=UpstreamAuthenticationFailed for payments-api"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-02T14:00:00Z",
+      "service": "orders-api",
+      "version": "0.0.1-old",
+      "commit": "a747620",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-07T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "a84c35d",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-306",
+      "title": "Authentication failures to an upstream",
+      "content": "Possible causes: rotated or revoked credentials, clock skew, permission changes, expired tokens. Check when the failures started and whether any secret or permission changed at that time."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "Secret payments-api-key was rotated but orders-api kept using its cached old credential, so payments-api answers 401",
+    "keywords": [
+      "rotat",
+      "credential|secret|api key|token|password",
+      "401|unauthorized|authenticat"
+    ],
+    "must_have": [
+      "payments-api-key|secrets-manager|rotation-job|cached|stale|old credential"
+    ],
+    "category": "credential_rotation",
+    "culprit_references": [
+      "Secret payments-api-key rotated",
+      "payments-api returned 401 Unauthorized: invalid credentials"
+    ]
+  }
+}

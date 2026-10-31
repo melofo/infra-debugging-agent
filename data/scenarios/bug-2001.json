@@ -1,0 +1,140 @@
+{
+  "ticket": {
+    "id": "BUG-2001",
+    "title": "orders-api intermittently returns HTTP 500",
+    "description": "Customers report random failures that started around 2pm UTC. Retrying sometimes works.",
+    "service": "orders-api",
+    "severity": "medium",
+    "reported_at": "2026-09-01T14:20:00Z"
+  },
+  "logs": [
+    {
+      "timestamp": "2026-09-01T13:35:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88000 total=42.10"
+    },
+    {
+      "timestamp": "2026-09-01T13:46:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Cache hit ratio 0.91 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-01T13:54:00Z",
+      "service": "orders-api",
+      "level": "WARN",
+      "message": "Slow response from payment gateway latency_ms=1800"
+    },
+    {
+      "timestamp": "2026-09-01T13:58:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Application started version=3.8.0 spring.datasource.hikari.maximumPoolSize=4"
+    },
+    {
+      "timestamp": "2026-09-01T14:02:00Z",
+      "service": "orders-api",
+      "level": "ERROR",
+      "message": "HikariPool-1 - Connection is not available, request timed out after 30000ms (total=4, active=4, idle=0, waiting=22)"
+    },
+    {
+      "timestamp": "2026-09-01T14:03:00Z",
+      "service": "orders-api",
+      "level": "ERROR",
+      "message": "Request failed status=500 cause=SQLTransientConnectionException"
+    },
+    {
+      "timestamp": "2026-09-01T14:04:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Order placed order_id=88100 total=15.00"
+    },
+    {
+      "timestamp": "2026-09-01T14:07:00Z",
+      "service": "orders-api",
+      "level": "WARN",
+      "message": "Cache miss ratio 0.42 for key prefix=catalog"
+    },
+    {
+      "timestamp": "2026-09-01T14:09:00Z",
+      "service": "orders-api",
+      "level": "ERROR",
+      "message": "HikariPool-1 - Connection is not available, request timed out after 30000ms (total=4, active=4, idle=0, waiting=33)"
+    },
+    {
+      "timestamp": "2026-09-01T14:10:00Z",
+      "service": "orders-api",
+      "level": "ERROR",
+      "message": "Request failed status=500 cause=SQLTransientConnectionException"
+    },
+    {
+      "timestamp": "2026-09-01T14:11:00Z",
+      "service": "orders-api",
+      "level": "INFO",
+      "message": "Charge succeeded charge_id=ch_9900 amount=42.10"
+    }
+  ],
+  "deploys": [
+    {
+      "timestamp": "2026-09-01T13:55:00Z",
+      "service": "orders-api",
+      "version": "3.8.0",
+      "commit": "768843e",
+      "author": "kpatel",
+      "summary": "Reduce idle database connection cost",
+      "diff_summary": "application.yml: spring.datasource.hikari.maximumPoolSize 40 -> 4"
+    },
+    {
+      "timestamp": "2026-08-27T14:00:00Z",
+      "service": "orders-api",
+      "version": "0.0.1-old",
+      "commit": "5c585cc",
+      "author": "dlee",
+      "summary": "Routine dependency update",
+      "diff_summary": "pom.xml: minor version bumps"
+    },
+    {
+      "timestamp": "2026-09-01T11:00:00Z",
+      "service": "payments-service",
+      "version": "5.2.1",
+      "commit": "8203dd0",
+      "author": "mchen",
+      "summary": "Bump logging library",
+      "diff_summary": "pom.xml: logback 1.4.11 -> 1.4.14"
+    }
+  ],
+  "runbooks": [
+    {
+      "id": "RB-300",
+      "title": "Intermittent 5xx with database errors",
+      "content": "Possible causes: connection pool too small for the traffic, long-running transactions holding connections, database failover, network problems between the service and the database. Check pool metrics, recent configuration changes and database health."
+    },
+    {
+      "id": "RB-007",
+      "title": "General HTTP 5xx investigation checklist",
+      "content": "1. Find the first error in the logs and note the time. 2. Check recent deploys of the affected service near that time. 3. Check dependencies (database, payment gateway, cache). 4. Compare error rate before and after the change."
+    },
+    {
+      "id": "RB-210",
+      "title": "Rotating the CDN signing key",
+      "content": "Steps to rotate the CDN signing key every quarter: generate a new key, publish it, wait for propagation, retire the old key."
+    }
+  ],
+  "ground_truth": {
+    "root_cause": "Deploy 3.8.0 reduced the database connection pool (spring.datasource.hikari.maximumPoolSize) from 40 to 4, so the pool is exhausted under normal load",
+    "keywords": [
+      "connection pool|pool size|pool exhaust",
+      "maximumpoolsize|pool size|maximum size|max size|pool max",
+      "3.8.0|768843e"
+    ],
+    "must_have": [
+      "maximumpoolsize|pool size|maximum size|max size|3.8.0|768843e"
+    ],
+    "category": "connection_pool_exhaustion",
+    "culprit_references": [
+      "768843e",
+      "Connection is not available, request timed out after 30000ms"
+    ]
+  }
+}

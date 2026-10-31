@@ -17,12 +17,14 @@
   - 追问：模型直接用文字回答。
 """
 
+import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
 
 from pydantic import ValidationError
 
+from app import telemetry
 from app.agent.common import (
     SUBMIT_TOOL_NAME,
     SYSTEM_PROMPT,
@@ -91,13 +93,29 @@ class InvestigationAgent:
         # "有函数调用、没有函数结果"的残缺片段，下一次请求会被模型厂商直接拒绝，
         # 这个会话就永远坏掉了。所以要么这一轮完整成功，要么就像没发生过：事务的思想。
         checkpoint = len(messages)
-        try:
-            return await self._run_turn(messages, user_text, ticket_id, require_report, on_step)
-        except BaseException:
-            # 用 BaseException 而不是 Exception：用户关掉网页时请求会被取消（CancelledError），
-            # 它属于 BaseException，同样需要回滚。回滚完用 raise 原样把异常继续往上抛。
-            del messages[checkpoint:]
-            raise
+        # 一个 span 对应"一轮"：里面的每次模型调用、每次工具调用是它的子 span，在追踪界面里是一棵树。
+        # 只记元数据（工单号、步数、token），不记提示词和工具返回的内容。
+        with telemetry.span("agent.turn", **{"ticket.id": ticket_id, "agent.require_report": require_report}) as turn_span:
+            try:
+                result = await self._run_turn(messages, user_text, ticket_id, require_report, on_step)
+            except BaseException as exc:
+                # 用 BaseException 而不是 Exception：用户关掉网页时请求会被取消（CancelledError），
+                # 它属于 BaseException，同样需要回滚。回滚完用 raise 原样把异常继续往上抛。
+                del messages[checkpoint:]
+                telemetry.record_turn("cancelled" if isinstance(exc, asyncio.CancelledError) else "error")
+                raise
+            telemetry.set_attributes(
+                turn_span,
+                **{
+                    "agent.steps": len(result.steps),
+                    "agent.llm_calls": result.llm_calls,
+                    "agent.input_tokens": result.input_tokens,
+                    "agent.output_tokens": result.output_tokens,
+                    "agent.has_report": result.report is not None,
+                },
+            )
+            telemetry.record_turn("ok")
+            return result
 
     async def _run_turn(
         self,
@@ -144,7 +162,10 @@ class InvestigationAgent:
             # 每一圈都把【完整历史】重发给模型（模型没有记忆）。
             # 这就是 token 增长的来源：对话越长、工具结果越多，每次请求越贵。
             try:
-                response = await self._llm.generate_with_tools(messages, tools, system=self._system_prompt)
+                clock = telemetry.Stopwatch()
+                with telemetry.span("llm.generate", **{"llm.step": step, "llm.history_messages": len(messages)}) as llm_span:
+                    response = await self._llm.generate_with_tools(messages, tools, system=self._system_prompt)
+                    telemetry.record_llm_call(llm_span, response, clock.elapsed())
             except LLMError:
                 if submitted is None:
                     raise  # 还没有任何成果：整轮失败，由 run_turn 回滚
@@ -187,6 +208,7 @@ class InvestigationAgent:
                         args = SubmitRCAArgs.model_validate(call.args)
                     except ValidationError as exc:
                         # 报告不合格（例如假设没有证据）：把原因告诉模型，让它重写，而不是崩溃。
+                        telemetry.record_rejection("schema")
                         message = f"invalid report: {exc.errors(include_url=False)}"
                         tool_results.append(ToolResult(call.name, message, is_error=True))
                         await add_step(StepRecord(step, call.name, call.args, False, preview(message)))
@@ -196,6 +218,7 @@ class InvestigationAgent:
                     problems = GroundingCorpus.from_messages(messages, extra=tuple(tool_results)).check(args)
                     if problems:
                         grounding_rejections += 1
+                        telemetry.record_rejection("grounding")
                         logger.warning("report rejected: unverifiable evidence", extra={"problems": len(problems)})
                         if grounding_rejections > MAX_GROUNDING_REJECTIONS:
                             # 反复提交无法核对的证据：宁可没有报告，也不交付无法追溯的结论。
@@ -210,14 +233,18 @@ class InvestigationAgent:
                     continue
 
                 # 普通调查工具：交给注册表执行（白名单 + 参数校验都在 registry 里）。
-                try:
-                    output = await self._registry.execute(call.name, call.args)
-                    tool_results.append(ToolResult(call.name, output))
-                    await add_step(StepRecord(step, call.name, call.args, True, preview(output)))
-                except ToolError as exc:
-                    # 工具出错不让整个调查崩溃：错误文字回传给模型，它常常能自己改正。
-                    tool_results.append(ToolResult(call.name, str(exc), is_error=True))
-                    await add_step(StepRecord(step, call.name, call.args, False, preview(exc)))
+                with telemetry.span("tool.execute", **{"tool.name": call.name}) as tool_span:
+                    clock = telemetry.Stopwatch()
+                    try:
+                        output = await self._registry.execute(call.name, call.args)
+                        telemetry.record_tool_call(tool_span, call.name, True, clock.elapsed(), len(str(output)))
+                        tool_results.append(ToolResult(call.name, output))
+                        await add_step(StepRecord(step, call.name, call.args, True, preview(output)))
+                    except ToolError as exc:
+                        # 工具出错不让整个调查崩溃：错误文字回传给模型，它常常能自己改正。
+                        telemetry.record_tool_call(tool_span, call.name, False, clock.elapsed())
+                        tool_results.append(ToolResult(call.name, str(exc), is_error=True))
+                        await add_step(StepRecord(step, call.name, call.args, False, preview(exc)))
 
             # 把所有工具结果作为一条 "tool" 消息追加，下一圈模型就能看到它们。
             messages.append(Message(role="tool", tool_results=tuple(tool_results)))

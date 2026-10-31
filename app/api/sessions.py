@@ -34,6 +34,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app import telemetry
 from app.agent.common import AgentError, StepRecord, session_system_prompt
 from app.auth import Principal, require_scope
 from app.agent.loop import InvestigationAgent
@@ -232,21 +233,25 @@ async def _run_session_turn(
         max_steps=settings.agent_max_steps,
         system_prompt=session_system_prompt(session.ticket_id),
     )
-    try:
-        # 还没有报告 = 这是首次调查，必须产出报告；已有报告 = 追问，文字回答即可。
-        result = await agent.run_turn(
-            session.messages,
-            message,
-            session.ticket_id,
-            require_report=session.report is None,
-            on_step=on_step,
-        )
-    except LLMError:
-        logger.exception("llm call failed in session")
-        raise HTTPException(status_code=502, detail="LLM provider error")
-    except AgentError as exc:
-        logger.error("turn failed", extra={"reason": str(exc)})
-        raise HTTPException(status_code=500, detail="agent did not complete this message")
+    # 会话 id 是"知道它就能访问会话"的凭证，不能原样写进追踪（有追踪权限的人就都能访问会话了）：只记哈希前缀。
+    with telemetry.span(
+        "session.turn", **{"session.id_hash": telemetry.opaque_id(session.id), "session.turn_index": len(session.turns) + 1}
+    ):
+        try:
+            # 还没有报告 = 这是首次调查，必须产出报告；已有报告 = 追问，文字回答即可。
+            result = await agent.run_turn(
+                session.messages,
+                message,
+                session.ticket_id,
+                require_report=session.report is None,
+                on_step=on_step,
+            )
+        except LLMError:
+            logger.exception("llm call failed in session")
+            raise HTTPException(status_code=502, detail="LLM provider error")
+        except AgentError as exc:
+            logger.error("turn failed", extra={"reason": str(exc)})
+            raise HTTPException(status_code=500, detail="agent did not complete this message")
 
     turn = Turn(
         user_message=message,

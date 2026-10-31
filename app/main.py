@@ -26,6 +26,7 @@ from app.logging_config import configure_logging
 from app.rag.embedder import create_embedder
 from app.rag.retrieval import KnowledgeBase
 from app.rag.runtime import active_knowledge_base
+from app.telemetry import configure_telemetry
 from app.sessions import PostgresSessionStore, SessionStore, make_registry_factory
 from app.worker import Worker
 
@@ -41,6 +42,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     if not settings.auth_required:
         logger.warning("API AUTHENTICATION IS DISABLED (AUTH_REQUIRED=false). Never run like this in production.")
+    # 可观测性：默认不导出（埋点是空操作）。放在最前面，这样启动过程之后的所有工作都能被追踪。
+    telemetry_handle = configure_telemetry(
+        settings.otel_exporter, settings.otel_endpoint, settings.otel_sample_ratio, settings.environment
+    )
     pool = create_pool(settings.database_url, settings.db_pool_max_size, settings.db_pool_timeout_seconds)
     app.state.pool = pool
 
@@ -111,6 +116,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception:
             logger.exception("worker crashed during shutdown")
 
+    # 把缓冲区里还没发出去的追踪和指标发完（批量导出器是攒一批再发的）。放在 worker 停下之后：它最后做的事也要被记录。
+    telemetry_handle.shutdown()
     await pool.close()
     # 关闭之后不要留着一个已关闭的池：之后任何人再取它都会拿到一个"死对象"。
     # 置为 None，依赖它的代码（get_pool）会如实报告"数据库不可用"（503）。

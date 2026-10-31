@@ -158,6 +158,24 @@ To avoid fooling ourselves: 6 **held-out** scenarios (`--split holdout`: autosca
 .venv/bin/python scripts/compare_evals.py eval_results/run2.jsonl eval_results/v2-dev.jsonl
 ```
 
+## Observability (OpenTelemetry)
+
+Traces and metrics follow the standard OpenTelemetry model, so the same instrumentation can feed Cloud Trace, Jaeger or any OTLP backend. Application code depends only on the tiny `opentelemetry-api`; with no exporter configured (the default) every call is a no-op, so monitoring can never take a request down.
+
+- **Traces:** a worker `job.process` span (attempt, outcome) contains an `agent.turn` span with one child per model call (`llm.generate`: tokens, tool-call count) and per tool call (`tool.execute`: tool name, ok, result size). Rejected reports appear as `report.rejected` events (grounding or schema). Session requests get a `session.turn` span.
+- **Metrics:** turns by outcome (ok, error, cancelled), tokens by direction, model and tool call durations, report rejections by kind, job outcomes.
+- **Logs and traces are linked:** every JSON log line written inside a span carries `trace_id` and `span_id`.
+- **Privacy by construction:** spans carry metadata only (tool names, counts, token numbers, statuses), never prompts, log contents, ticket text or tool arguments; every attribute is sanitized to numbers, booleans and short strings, and the session id (a bearer-style capability) is only recorded as a hash prefix.
+- **Sampling:** `OTEL_SAMPLE_RATIO` keeps a fraction of traces, parent-based so a trace is kept or dropped as a whole.
+
+```bash
+OTEL_EXPORTER=console .venv/bin/uvicorn app.main:app      # spans and metrics printed to stderr
+OTEL_EXPORTER=otlp OTEL_ENDPOINT=http://localhost:4318 ... # OTLP/HTTP to a collector (auth headers via the standard OTEL_EXPORTER_OTLP_HEADERS)
+.venv/bin/python scripts/show_trace.py --llm gemini --scenario bug-2010   # one investigation as an indented span tree with timings
+```
+
+Not instrumented yet: HTTP request spans (add `opentelemetry-instrumentation-fastapi` when a collector exists) and database queries.
+
 ## Human approval for write actions
 
 The agent is read-only: it never holds write credentials. When an automatic investigation succeeds, the worker records a **proposal** to post a Jira comment (`GET /actions`, web UI page *Approvals*). Nothing is posted until an `admin` key approves it:

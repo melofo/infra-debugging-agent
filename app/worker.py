@@ -31,7 +31,7 @@ import uuid
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
-from app import actions, jobs
+from app import actions, jobs, telemetry
 from app.agent.common import AgentError, InvestigationResult
 from app.agent.loop import InvestigationAgent
 from app.config import Settings
@@ -135,7 +135,18 @@ class Worker:
 
     # ------------------------------------------------------------------ 执行一个任务
     async def process(self, job: Job) -> None:
+        """执行一个任务。外面套一个 span：任务的整个生命周期（含重试第几次、最终结果）在追踪里是一棵树的根。"""
+        with telemetry.span("job.process", **{"job.id": str(job.id), "ticket.id": job.ticket_id, "job.attempt": job.attempts}) as job_span:
+            outcome = await self._process(job)
+            telemetry.set_attributes(job_span, **{"job.outcome": outcome})
+            telemetry.record_job(outcome)
+            if outcome != "succeeded":
+                telemetry.mark_error(job_span, f"job {outcome}")
+
+    async def _process(self, job: Job) -> str:
+        """返回这次处理的结果：succeeded / failed / invalid_job / timeout / unexpected / reclaimed。"""
         log = {"job_id": str(job.id), "ticket_id": job.ticket_id, "attempt": job.attempts}
+        outcome = "succeeded"
         logger.info("job started", extra=log)
         try:
             # 超时保护：一次调查最多 job_timeout_seconds。asyncio.timeout 是 Python 3.11 的写法，
@@ -149,27 +160,33 @@ class Worker:
             raise
         except InvalidJob as exc:
             # 任务引用的数据不存在或已损坏。这种问题重试一百次也一样，直接最终失败，别浪费钱。
+            outcome = "invalid_job"
             await self._fail(job, f"invalid job: {exc}", permanent=True)
         except TimeoutError:
+            outcome = "timeout"
             await self._fail(job, f"investigation timed out after {self._settings.job_timeout_seconds:g}s")
         except (LLMError, AgentError) as exc:
             # 模型服务出问题（限流、过载）或 Agent 没能完成：可能是暂时的，按退避重试。
             # 截断长度：服务商的错误信息可能很长，只留开头足够排查，完整内容在日志里。
             logger.warning("investigation failed", extra={**log, "error": str(exc)})
+            outcome = "failed"
             await self._fail(job, f"{type(exc).__name__}: {str(exc)[:200]}")
         except Exception as exc:
             # 意料之外的异常，它的消息可能含内部细节（路径、SQL、连接串）。
             # 完整信息和堆栈只写日志，存进数据库、对外展示的只有异常的类型名。
             logger.exception("unexpected error while processing job", extra=log)
+            outcome = "unexpected"
             await self._fail(job, f"unexpected {type(exc).__name__} (see server logs)")
         else:
             done = await jobs.complete(self._pool, job.id, self.worker_id, job.attempts, result_to_dict(result))
             if done is None:
                 # 围栏拒绝了我们：任务在这期间被回收并交给了别人。我们的结果作废，不能覆盖别人的。
                 logger.warning("job was reclaimed while running; result discarded", extra=log)
+                outcome = "reclaimed"
             else:
                 logger.info("job succeeded", extra={**log, "llm_calls": result.llm_calls})
                 await self._propose_writeback(job, result)
+        return outcome
 
     async def _investigate(self, job: Job) -> InvestigationResult:
         # 只在"加载数据"这一步把这两类错误认定为"任务本身有问题"。

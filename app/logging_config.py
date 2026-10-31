@@ -16,6 +16,8 @@ import logging
 import sys
 from datetime import datetime, timezone
 
+from app.telemetry import current_ids
+
 # LogRecord 自带的标准属性。除了这些以外，用户通过 extra={...} 传入的字段才是我们要额外输出的。
 _STANDARD_ATTRS = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
 
@@ -30,6 +32,11 @@ class JsonFormatter(logging.Formatter):
         }
         # logger.info("llm call", extra={"latency_ms": 120}) 里的 extra 字段会成为 record 的属性，
         # 这里把它们捞出来放进 JSON，实现 "结构化" 的关键一步。
+        # 如果当前正处在某个追踪 span 里，把 trace_id / span_id 写进日志：
+        # 在追踪界面看到一次慢请求，可以直接用 trace_id 搜出它的所有日志，反过来也一样。
+        ids = current_ids()
+        if ids:
+            payload["trace_id"], payload["span_id"] = ids
         for key, value in record.__dict__.items():
             if key not in _STANDARD_ATTRS:
                 payload[key] = value

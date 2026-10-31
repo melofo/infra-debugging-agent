@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     # 提议本身不会产生任何副作用；只有人批准之后才会真正执行。
     writeback_proposals_enabled: bool = True
     approval_ttl_hours: float = 24.0  # 提议多久不处理就过期
+    # 可观测性（OpenTelemetry）。none = 不导出（默认，埋点是空操作）；console = 打印到 stderr；otlp = 发给收集器。
+    # OTLP 的认证头用标准环境变量 OTEL_EXPORTER_OTLP_HEADERS 提供，不放在这里。
+    otel_exporter: Literal["none", "console", "otlp"] = "none"
+    otel_endpoint: str = "http://localhost:4318"
+    otel_sample_ratio: float = 1.0  # 保留多大比例的追踪（0 到 1）；高流量时调低以控制成本
+
     # 允许哪些网页来源调用我们的 API（CORS，见 main.py）。默认只放行本地前端开发服务器。
     # 环境变量里用 JSON 数组写：CORS_ORIGINS='["https://my-ui.example.com"]'
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
@@ -103,6 +109,12 @@ class Settings(BaseSettings):
     # env_file：本地开发从项目根目录的 .env 读取。
     # extra="ignore"：.env 里有我们没声明的变量时不报错。
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @model_validator(mode="after")
+    def _check_otel(self) -> "Settings":
+        if not 0.0 <= self.otel_sample_ratio <= 1.0:
+            raise ValueError("OTEL_SAMPLE_RATIO must be between 0 and 1")
+        return self
 
     @model_validator(mode="after")
     def _check_mcp_http(self) -> "Settings":

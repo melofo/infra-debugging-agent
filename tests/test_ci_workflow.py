@@ -4,6 +4,7 @@
 这里防的是以后有人改工作流时把安全设置或一致性改掉。）
 """
 
+import json
 import re
 from pathlib import Path
 
@@ -66,7 +67,10 @@ def test_runtime_versions_match_the_docker_images():
 
 def test_the_frontend_job_runs_every_check_in_order():
     commands_ = [s["run"] for s in steps("frontend") if "run" in s]
-    assert commands_ == ["npm ci", "npm run lint", "npx tsc --noEmit", "npm test", "npm run build"]
+    assert commands_ == ["npm ci", "npm run lint", "npm run typecheck", "npm test", "npm run build"]
+    scripts = json.loads((ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))["scripts"]
+    # 类型检查必须先生成 Next 的路由类型，否则在干净的检出里会报"找不到 PageProps/LayoutProps"
+    assert scripts["typecheck"].startswith("next typegen") and "tsc --noEmit" in scripts["typecheck"]
     assert JOBS["frontend"]["defaults"]["run"]["working-directory"] == "frontend"
 
 

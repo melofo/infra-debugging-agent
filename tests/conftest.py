@@ -16,6 +16,11 @@ os.environ["AUTH_REQUIRED"] = "false"
 # 同理：线上默认的 agent 配置是 v2（多一个 list_services 工具和一段提示词），已有的测试断言的是 v1 的工具集和提示词，
 # 所以测试环境默认固定为 v1；专门测 v2 的测试（tests/test_agent_variant.py）会显式传入 v2。
 os.environ["AGENT_VARIANT"] = "v1"
+# 测试里【永远没有】真实的模型密钥：环境变量优先于 .env，所以即使你的 .env 里有真实密钥，测试也看不到它。
+# 两个好处：(1) 测试在你的机器上和在 CI 里的环境完全一样（CI 没有 .env）——以前有个测试悄悄依赖了本地 .env，
+# 在 CI 里才露馅；(2) 任何测试都不可能不小心调用真实模型、花真钱。需要模型的测试一律用假模型。
+os.environ["GEMINI_API_KEY"] = ""
+os.environ["GEMINI_MODEL"] = ""
 
 import psycopg
 import pytest

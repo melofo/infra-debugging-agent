@@ -79,7 +79,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci          # 严格按锁文件安装；锁文件缺包时在 Linux 上会失败（正是我们之前遇到的问题）
       - run: npm run lint
-      - run: npx tsc --noEmit
+      - run: npm run typecheck   # next typegen && tsc：Next 的路由类型（PageProps、LayoutProps）是生成出来的，干净的检出里没有
       - run: npm test
       - run: npm run build
 

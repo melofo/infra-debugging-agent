@@ -15,9 +15,11 @@ import pytest
 
 from app import auth
 from app.config import Settings
+from app.api.chat import get_llm_client
 from app.db import get_pool
 from app.main import app
 from app.sessions import SessionStore, get_session_store
+from tests.fakes import ScriptedLLM
 
 
 @pytest.fixture
@@ -34,6 +36,9 @@ async def secured(pool, monkeypatch, store):
     app.state.pool = pool
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[get_session_store] = lambda: store
+    # 发消息的接口在检查所有权之前就要解析"模型客户端"这个依赖：没有配置模型密钥时它会返回 503。
+    # 这个测试以前悄悄依赖了本地 .env 里的真实密钥，在没有 .env 的 CI 里才露馅。现在显式给一个假模型（不会被调用）。
+    app.dependency_overrides[get_llm_client] = lambda: ScriptedLLM([])
     yield pool
     app.dependency_overrides.clear()
     if had_pool:

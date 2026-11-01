@@ -99,6 +99,8 @@ class Smoke:
             if up.returncode == 0:
                 self.checks()
         finally:
+            if self.failures:
+                self.dump_diagnostics()  # 失败时先把现场留下来（拆掉之前），不然 CI 里只剩一句"某项检查失败"，没法排查
             if self.keep and self.failures:
                 print(f"--keep: leaving the stack up (docker compose -p {PROJECT} ...)")
             else:
@@ -106,6 +108,15 @@ class Smoke:
             self.tmp.cleanup()
         print(f"\n{'FAILED: ' + ', '.join(self.failures) if self.failures else 'all checks passed'}")
         return 1 if self.failures else 0
+
+    def dump_diagnostics(self) -> None:
+        """打印容器状态和每个服务最后的日志。日志里的密钥不会出现：测试用的是假密钥。"""
+        print("\n===== diagnostics (container state and recent logs) =====", flush=True)
+        ps = self.compose("ps", "-a", "--format", "{{.Service}}: {{.Status}} (exit code {{.ExitCode}})", check=False)
+        print(ps.stdout or ps.stderr, flush=True)
+        for service in ("db", "backend", "worker", "frontend"):
+            logs = self.compose("logs", "--no-color", "--tail", "40", service, check=False)
+            print(f"----- {service} (last 40 lines) -----\n{(logs.stdout or logs.stderr).strip()}\n", flush=True)
 
     def checks(self) -> None:
         status, body, _ = self.http(f"{self.backend}/health")

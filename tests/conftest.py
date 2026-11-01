@@ -24,6 +24,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from app.config import Settings
 from app.db import create_pool, init_knowledge_schema, init_schema
+from tests.db_guard import unavailable
 
 TEST_DB_NAME = "agent_test"
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -41,7 +42,7 @@ async def pool():
     base_url = Settings(_env_file=None).database_url
     host = conninfo_to_dict(base_url).get("host")
     if host not in LOCAL_HOSTS:
-        pytest.skip(f"refusing to run destructive DB tests against non-local host {host!r}")
+        unavailable(f"refusing to run destructive DB tests against non-local host {host!r}")
 
     try:
         # CREATE DATABASE 不能在事务里执行，所以这里要开启 autocommit。
@@ -52,7 +53,7 @@ async def pool():
             if not exists:
                 await admin.execute(f'CREATE DATABASE "{TEST_DB_NAME}"')
     except psycopg.OperationalError:
-        pytest.skip("PostgreSQL is not running (start it with: docker compose up -d db)")
+        unavailable("PostgreSQL is not running (start it with: docker compose up -d db)")
 
     test_pool: AsyncConnectionPool = create_pool(make_conninfo(base_url, dbname=TEST_DB_NAME))
     await test_pool.open(wait=True, timeout=5)
@@ -67,7 +68,7 @@ async def pool():
 async def knowledge_pool(pool):
     """在 pool 的基础上准备好知识库的表（需要 pgvector），每个测试开始前表是空的。"""
     if not await init_knowledge_schema(pool):
-        pytest.skip("pgvector extension is not available in this PostgreSQL")
+        unavailable("pgvector extension is not available in this PostgreSQL")
     async with pool.connection() as conn:
         await conn.execute("TRUNCATE knowledge_documents CASCADE")  # CASCADE 连带清空 knowledge_chunks
     return pool

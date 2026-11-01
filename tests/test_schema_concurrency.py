@@ -14,6 +14,7 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from app import db
 from app.config import Settings
 from app.db import create_pool, init_knowledge_schema, init_schema
+from tests.db_guard import unavailable
 
 STARTERS = 8
 ROUNDS = 4
@@ -23,7 +24,7 @@ ROUNDS = 4
 async def fresh_database():
     base = Settings(_env_file=None).database_url
     if conninfo_to_dict(base).get("host") not in {"127.0.0.1", "localhost", "::1"}:
-        pytest.skip("refusing to create databases on a non-local host")
+        unavailable("refusing to create databases on a non-local host")
     created: list[str] = []
 
     async def make() -> str:
@@ -37,7 +38,7 @@ async def fresh_database():
     try:
         await psycopg.AsyncConnection.connect(base, connect_timeout=3)
     except psycopg.OperationalError:
-        pytest.skip("PostgreSQL is not running (start it with: docker compose up -d db)")
+        unavailable("PostgreSQL is not running (start it with: docker compose up -d db)")
     yield make
     async with await psycopg.AsyncConnection.connect(base, autocommit=True) as admin:
         for name in created:

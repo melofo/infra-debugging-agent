@@ -164,6 +164,12 @@ To avoid fooling ourselves: 6 **held-out** scenarios (`--split holdout`: autosca
 .venv/bin/python scripts/compare_evals.py eval_results/run2.jsonl eval_results/v2-dev.jsonl
 ```
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request, with no secrets and read-only permissions: **backend** (the test suite against a real pgvector Postgres service, then the free evaluation baselines in the job summary), **frontend** (`npm ci`, lint, type check, tests, production build), **docker** (builds both images, starts the whole stack and runs `scripts/smoke_test_stack.py`, the same script you can run locally; it checks health, auth, CORS, session persistence across a restart, the separate worker, the frontend bundle, non-root, no `.env` in the image, and graceful shutdown) and a non-blocking dependency **audit**. A missing CI database fails the tests (`REQUIRE_DB=1`) instead of silently skipping them. Static tests pin the workflow's safety properties (least privilege, official actions only, no `pull_request_target`, image and runtime versions equal to the Dockerfiles').
+
+Honest status: the workflow has not run on GitHub yet; I ran every command it contains locally, in the same order, and the smoke test for real (and confirmed it fails when graceful shutdown is broken). Actions are pinned to major version tags, not commit SHAs; pinning SHAs is the stricter supply-chain choice.
+
 ## Docker and deployment
 
 `docker compose --profile app up --build -d` runs the whole system in containers (database, web API, a separate worker process, frontend); plain `docker compose up -d db` still starts only the database for development. Images are multi-stage, run as non-root, carry no secrets or test tooling, and shut down gracefully on SIGTERM. `ENVIRONMENT=production` makes the app refuse unsafe defaults at startup. See `docs/deployment.md` for what was verified locally, the production settings, and a Cloud Run guide (written but not executed: it needs a GCP project).

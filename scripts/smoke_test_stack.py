@@ -5,7 +5,7 @@
 
 它把"我手动验证过一遍"变成可以随时重复的检查：以后有人改了 Dockerfile、compose 或启动流程，这里会立刻发现。
 检查项：健康/就绪、认证（无 key 401，有 key 200）、CORS、会话在后端重启后还在、独立 Worker 容器处理任务、
-前端能访问并带着后端地址、容器不是 root 且镜像里没有 .env、停止容器时优雅退出（退出码 0）。
+Worker 容器的健康状态（心跳）、前端能访问并带着后端地址、容器不是 root 且镜像里没有 .env、停止容器时优雅退出（退出码 0）。
 
 【安全】用一份临时的 compose 覆盖文件，给后端和 Worker 填入假的模型密钥：
   - 不会把你 .env 里的真实密钥传进测试容器；
@@ -145,6 +145,9 @@ class Smoke:
         up_again = self.wait_for(lambda: self.http(f"{self.backend}/health")[0] == 200 if self._reachable() else False, 60)
         self.check("backend comes back after a restart", bool(up_again))
         self.check("the session survived the restart (stored in Postgres)", self.http(f"{self.backend}/sessions/{session_id}", headers=auth)[0] == 200)
+
+        health = subprocess.run(["docker", "inspect", f"{PROJECT}-worker-1", "--format", "{{.State.Health.Status}}"], capture_output=True, text=True).stdout.strip()
+        self.check("worker container reports healthy (heartbeat)", health == "healthy", f"health={health!r}")
 
         self.enqueue_unprocessable_job()
         job = self.wait_for(lambda: self.failed_job(auth), 40)

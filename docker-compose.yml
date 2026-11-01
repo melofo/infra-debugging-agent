@@ -77,7 +77,14 @@ services:
     # Worker 收到停止信号后会做完当前任务（最多 SHUTDOWN_GRACE_SECONDS，默认 10 秒），做不完就放回队列。
     stop_grace_period: 30s
     healthcheck:
-      disable: true   # 镜像里的 HEALTHCHECK 是检查 Web 端口的，Worker 不监听端口
+      # 镜像里的 HEALTHCHECK 是检查 Web 端口的，Worker 不监听端口，所以要换成它自己的：看心跳文件够不够新
+      # （见 app/heartbeat.py）。没有健康检查的话，卡死的 Worker 会一直显示"在线"，`docker compose up --wait`
+      # 在较新的 Compose 版本上还会直接报错。
+      test: ["CMD", "python", "-c", "import sys; from app.heartbeat import is_alive; sys.exit(0 if is_alive() else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   frontend:
     profiles: ["app"]

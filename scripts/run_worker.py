@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import Settings  # noqa: E402
+from app.heartbeat import heartbeat_path, run_heartbeat  # noqa: E402
 from app.db import create_pool, init_knowledge_schema, init_schema  # noqa: E402
 from app.llm.factory import LLMNotConfigured, create_llm_client  # noqa: E402
 from app.logging_config import configure_logging  # noqa: E402
@@ -62,6 +63,8 @@ async def run() -> int:
             loop.add_signal_handler(sig, stop.set)
 
         worker = Worker(pool, llm, settings, knowledge=knowledge)
+        # 心跳：容器的健康检查靠它判断 Worker 是不是还活着（见 app/heartbeat.py）。
+        beat_task = asyncio.create_task(run_heartbeat(heartbeat_path(), stop), name="heartbeat")
         task = asyncio.create_task(worker.run(stop), name="investigation-worker")
         await stop.wait()  # 一直等到收到停止信号
         logger.info("stop signal received, finishing the current job")
@@ -69,6 +72,7 @@ async def run() -> int:
             await asyncio.wait_for(task, settings.shutdown_grace_seconds)
         except (TimeoutError, asyncio.CancelledError):
             logger.warning("worker did not finish in time; its job was released back to the queue")
+        await beat_task  # stop 已经设置，心跳任务会自己结束
         return 0
     finally:
         # 顺序和 Web 服务一样：先停 Worker（上面已经停了），再冲刷监控数据，最后才关连接池。

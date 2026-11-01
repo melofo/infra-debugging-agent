@@ -39,7 +39,7 @@ The same backend image runs the web service and the worker (`python scripts/run_
 - Stack comes up healthy (`db` first, then `backend`, then `frontend`); `/health` and `/ready` answer; `database ready` is logged.
 - Auth is enforced (401 without a key, 200 with one created by the script inside the container); CORS preflight from the UI origin is allowed including the `Authorization` header.
 - A chat session survives `docker compose restart backend` (it lives in Postgres).
-- With `WORKER_ENABLED=false` on the web service and a separate `worker` container, a queued job was processed by the worker container only.
+- With `WORKER_ENABLED=false` on the web service and a separate `worker` container, a queued job was processed by the worker container only. The worker has no port, so its health is a heartbeat file written by a task that shares the event loop with the job loop (stuck loop = stale heartbeat = unhealthy; a long investigation awaiting the model keeps beating).
 - `docker compose stop`: worker and backend exit with code 0 in about half a second (graceful shutdown works), frontend exits 143.
 
 Two real bugs were found by doing this and fixed: (1) schema creation raced when several instances started at once (35 errors in 8-way tests, and the knowledge step silently reported "pgvector unavailable"); it now takes a Postgres advisory lock. (2) The frontend lockfile was generated on macOS and lacked two optional packages, so `npm ci` failed on Linux; the lockfile was regenerated on Linux.

@@ -111,6 +111,26 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @model_validator(mode="after")
+    def _check_production(self) -> "Settings":
+        """ENVIRONMENT=production 时，拒绝启动在"不安全的默认值"上。
+
+        默认值是为本地开发方便而选的（比如 CORS 放行 localhost）。生产环境里忘了改它们，不会报错，
+        只会悄悄地不安全。所以宁可在启动时就明确失败，把"忘了配置"变成一个当场能看到的错误（fail fast）。
+        """
+        if self.environment != "production":
+            return self
+        problems = []
+        if not self.auth_required:
+            problems.append("AUTH_REQUIRED must be true")
+        if self.session_store != "postgres":
+            problems.append("SESSION_STORE must be postgres (memory sessions are lost on restart and not shared between instances)")
+        if any(origin.startswith(("http://localhost", "http://127.0.0.1")) for origin in self.cors_origins):
+            problems.append("CORS_ORIGINS must list your real web origins, not localhost")
+        if problems:
+            raise ValueError("unsafe production configuration: " + "; ".join(problems))
+        return self
+
+    @model_validator(mode="after")
     def _check_otel(self) -> "Settings":
         if not 0.0 <= self.otel_sample_ratio <= 1.0:
             raise ValueError("OTEL_SAMPLE_RATIO must be between 0 and 1")

@@ -1,0 +1,13 @@
+# 生产镜像（Dockerfile）安装的依赖：和 requirements.txt 的区别只有测试工具（pytest、pytest-asyncio）。
+# 两个文件必须同步，tests/test_requirements.py 会检查。开发时用 requirements.txt。
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic-settings>=2.4
+httpx>=0.27
+google-genai>=2.0
+psycopg[binary,pool]>=3.2
+pyyaml>=6.0
+mcp>=2.3,<3
+opentelemetry-api>=1.27,<2
+opentelemetry-sdk>=1.27,<2
+opentelemetry-exporter-otlp-proto-http>=1.27,<2

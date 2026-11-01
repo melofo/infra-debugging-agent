@@ -1,0 +1,17 @@
+# 不进镜像的东西。最重要的是 .env：密钥绝不能被"顺手"打进镜像（镜像一推到仓库，密钥就跟着出去了）。
+.env
+.env.*
+.git
+.gitignore
+.venv
+.pytest_cache
+__pycache__
+**/__pycache__
+*.pyc
+eval_results
+frontend
+tests
+docs
+/*.md
+docker-compose.yml
+Dockerfile

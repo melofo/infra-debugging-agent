@@ -36,14 +36,14 @@ def _parse(requirement: str) -> tuple[str, set[str], str | None]:
     return name, extras, own_extra.group(1) if own_extra else None
 
 
-def declared_closure() -> set[str]:
+def declared_closure(filename: str = "requirements.txt") -> set[str]:
     """requirements.txt 里的包，加上它们的传递依赖（用已安装包的元数据逐层展开）。
 
     要处理 extras：`psycopg[binary,pool]` 明确要求安装 pool 这个可选依赖组，
     所以带有 `extra == "pool"` 标记的依赖（psycopg-pool）也算声明过；没被要求的 extra 则不算。
     """
     pending: list[tuple[str, set[str]]] = []
-    for line in (ROOT / "requirements.txt").read_text().splitlines():
+    for line in (ROOT / filename).read_text().splitlines():
         line = line.split("#")[0].strip()
         if line:
             name, extras, _ = _parse(line)
@@ -70,10 +70,10 @@ def declared_closure() -> set[str]:
     return names
 
 
-def third_party_imports() -> dict[str, set[str]]:
+def third_party_imports(folders: tuple[str, ...] = ("app", "scripts", "tests")) -> dict[str, set[str]]:
     stdlib = set(sys.stdlib_module_names)
     used: dict[str, set[str]] = {}
-    for folder in ("app", "scripts", "tests"):
+    for folder in folders:
         for file in (ROOT / folder).rglob("*.py"):
             for node in ast.walk(ast.parse(file.read_text())):
                 if isinstance(node, ast.Import):
@@ -102,3 +102,28 @@ def test_every_third_party_import_is_covered_by_requirements_txt():
         f"imported but not covered by requirements.txt: {missing}. "
         "Add the package to requirements.txt (someone who clones the repo will not have it otherwise)."
     )
+
+
+TEST_ONLY = {"pytest", "pytest-asyncio"}
+
+
+def test_the_production_requirements_cover_everything_the_app_and_scripts_import():
+    """生产镜像只装 requirements-prod.txt。应用和脚本 import 的包缺了一个，容器启动时才会发现，那时已经晚了。"""
+    closure = declared_closure("requirements-prod.txt")
+    owners = metadata.packages_distributions()
+    missing = {
+        module: sorted(files)[:2]
+        for module, files in third_party_imports(("app", "scripts")).items()
+        if not {_normalize(d) for d in owners.get(module, [])} & closure
+    }
+    assert missing == {}, f"the production image would be missing: {missing}"
+
+
+def test_the_production_requirements_are_the_dev_requirements_minus_the_test_tools():
+    def names(filename: str) -> set[str]:
+        lines = (ROOT / filename).read_text().splitlines()
+        return {_parse(l.split("#")[0].strip())[0] for l in lines if l.split("#")[0].strip()}
+
+    assert names("requirements.txt") - names("requirements-prod.txt") == TEST_ONLY
+    assert names("requirements-prod.txt") - names("requirements.txt") == set()
+    assert not names("requirements-prod.txt") & TEST_ONLY

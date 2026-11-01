@@ -1,4 +1,10 @@
-# 本地开发用的 PostgreSQL。启动：docker compose up -d db    停止：docker compose down
+# 本地开发：只起数据库（后端和前端在你的终端里直接跑，改代码即时生效）：
+#     docker compose up -d db        停止：docker compose down
+# 完整的容器化运行（后端 + Worker + 前端 + 数据库，和部署时的形态一致）：
+#     docker compose --profile app up --build -d
+#     然后打开 http://localhost:3000 ；后端在 http://localhost:8000
+#     停止：docker compose --profile app down
+# 密钥（GEMINI_API_KEY 等）从项目根目录的 .env 读取，不会被打进镜像（见 .dockerignore）。
 #
 # Docker Compose 用一个 YAML 文件描述"需要哪些容器、怎么配置"，一条命令全部拉起。
 # 可以类比 Java 项目里用 Testcontainers，或者本地手动装一个数据库，但可重复、不污染系统。
@@ -15,7 +21,8 @@ services:
       POSTGRES_DB: agent
     ports:
       # 前面的 127.0.0.1 很重要：只允许本机访问。写成 "5432:5432" 会暴露给局域网里的所有设备。
-      - "127.0.0.1:5432:5432"
+      # 端口可以用 DB_PORT 改（同时跑两套环境、或本机 5432 已被占用时用）。
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       # 数据存在 Docker 的"命名卷"里：容器删除重建，数据还在（docker compose down -v 才会清掉）。
       - pgdata:/var/lib/postgresql/data
@@ -25,6 +32,67 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
+
+  # ---------------------------------------------------------------------------
+  # 下面三个服务在 "app" 这个 profile 里：默认的 `docker compose up -d db` 不会启动它们。
+  # ---------------------------------------------------------------------------
+  backend:
+    profiles: ["app"]
+    build: .
+    image: infra-agent-backend
+    # .env 可以不存在（required: false）；里面有 GEMINI_API_KEY、JIRA_WEBHOOK_SECRET 等。
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # 容器里的数据库地址是服务名 db（Compose 的内部 DNS），不是 localhost：每个容器有自己的 localhost。
+      DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD:-devpassword}@db:5432/agent
+      # Web 服务只处理 HTTP；调查任务由下面独立的 worker 服务做（两者可以分别扩缩容）。
+      WORKER_ENABLED: "false"
+      CORS_ORIGINS: '["http://localhost:${FRONTEND_PORT:-3000}","http://127.0.0.1:${FRONTEND_PORT:-3000}"]'
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy   # 数据库真的能接受连接了才启动后端
+    restart: unless-stopped
+    # 优雅关闭：给足时间做完手头的请求（SIGTERM 之后最多等这么久才强制杀死）。
+    stop_grace_period: 30s
+
+  worker:
+    profiles: ["app"]
+    image: infra-agent-backend
+    command: ["python", "scripts/run_worker.py"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD:-devpassword}@db:5432/agent
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy   # 等 Web 服务建好表再启动（建表有锁保护，不等也安全，这里只是启动顺序更整齐）
+    restart: unless-stopped
+    # Worker 收到停止信号后会做完当前任务（最多 SHUTDOWN_GRACE_SECONDS，默认 10 秒），做不完就放回队列。
+    stop_grace_period: 30s
+    healthcheck:
+      disable: true   # 镜像里的 HEALTHCHECK 是检查 Web 端口的，Worker 不监听端口
+
+  frontend:
+    profiles: ["app"]
+    build:
+      context: frontend
+      args:
+        # 浏览器直接访问后端，所以这里必须是【浏览器能访问到】的地址（宿主机的映射端口），不是容器内部的服务名。
+        NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8000}
+    image: infra-agent-frontend
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:

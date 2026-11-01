@@ -158,6 +158,10 @@ To avoid fooling ourselves: 6 **held-out** scenarios (`--split holdout`: autosca
 .venv/bin/python scripts/compare_evals.py eval_results/run2.jsonl eval_results/v2-dev.jsonl
 ```
 
+## Docker and deployment
+
+`docker compose --profile app up --build -d` runs the whole system in containers (database, web API, a separate worker process, frontend); plain `docker compose up -d db` still starts only the database for development. Images are multi-stage, run as non-root, carry no secrets or test tooling, and shut down gracefully on SIGTERM. `ENVIRONMENT=production` makes the app refuse unsafe defaults at startup. See `docs/deployment.md` for what was verified locally, the production settings, and a Cloud Run guide (written but not executed: it needs a GCP project).
+
 ## Observability (OpenTelemetry)
 
 Traces and metrics follow the standard OpenTelemetry model, so the same instrumentation can feed Cloud Trace, Jaeger or any OTLP backend. Application code depends only on the tiny `opentelemetry-api`; with no exporter configured (the default) every call is a no-op, so monitoring can never take a request down.

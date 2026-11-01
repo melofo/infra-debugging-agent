@@ -36,12 +36,31 @@ def create_pool(database_url: str, max_size: int = 5, timeout: float = 5.0) -> A
     )
 
 
+# 建表时用的咨询锁编号（任意固定的整数，只要全应用统一）。
+SCHEMA_LOCK_KEY = 7_315_001
+
+
+async def _schema_lock(conn) -> None:
+    """让"同时启动的多个实例"排队建表，一个一个来。
+
+    问题：CREATE TABLE IF NOT EXISTS 看起来是幂等的，但两个连接【同时】执行时，两边都发现表不存在，
+    都去创建，后到的那个会因为系统目录里的唯一约束冲突而报错（pg_type_typname_nsp_index），CREATE EXTENSION 同理。
+    在 Cloud Run 这样会同时拉起好几个实例的环境里，这不是理论上的问题，而是每次发布都会碰到。
+    更糟的是知识库那一步会把这个错误当成"pgvector 不可用"悄悄吞掉：输掉竞争的实例会在没有语义检索的状态下一直运行，没人发现。
+
+    解法：事务级咨询锁 pg_advisory_xact_lock。拿不到锁的会等到持有者提交，然后发现表已经存在，什么也不做。
+    "xact" 版本在事务结束（提交或回滚）时自动释放，进程崩溃也不会留下永远不放的锁。
+    """
+    await conn.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK_KEY,))
+
+
 async def init_schema(pool: AsyncConnectionPool) -> None:
     """执行 schema.sql 建表。所有语句都是 IF NOT EXISTS，重复执行是安全的。"""
     # `async with pool.connection() as conn` 的含义：从池里借一条连接，用完自动还回去。
     # psycopg 默认在一个事务里执行语句；正常退出这个 with 块时自动 COMMIT，抛异常则自动 ROLLBACK。
     # （和 JDBC 里 autoCommit=false 然后手动 commit/rollback 是同一回事，只是自动化了。）
     async with pool.connection() as conn:
+        await _schema_lock(conn)
         await conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
@@ -53,6 +72,7 @@ async def init_knowledge_schema(pool: AsyncConnectionPool) -> bool:
     """
     try:
         async with pool.connection() as conn:
+            await _schema_lock(conn)
             await conn.execute(KNOWLEDGE_SCHEMA_PATH.read_text(encoding="utf-8"))
         return True
     except psycopg.Error:

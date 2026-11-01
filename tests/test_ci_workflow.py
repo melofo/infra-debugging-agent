@@ -105,3 +105,9 @@ def test_without_a_database_db_tests_skip_locally_but_fail_in_ci_mode():
     assert local.returncode == 0 and "skipped" in local.stdout  # 本地：没装 Docker 的人也能跑其他测试
     ci = run_db_tests_without_a_database(require_db=True)
     assert ci.returncode != 0 and "REQUIRE_DB=1" in ci.stdout  # CI：数据库没起来就必须报错，不能悄悄变绿
+
+
+def test_runners_are_pinned_so_a_platform_migration_cannot_turn_a_green_pipeline_red():
+    runners = {job["runs-on"] for job in JOBS.values()}
+    assert runners == {"ubuntu-24.04"}  # 不用 ubuntu-latest：GitHub 会把它迁移到新系统版本
+    assert "ubuntu-latest" not in TEXT.replace("ubuntu-latest：", "").replace("而不是 ubuntu-latest", "")

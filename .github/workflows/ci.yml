@@ -26,9 +26,12 @@ concurrency:
 permissions:
   contents: read
 
+# 运行环境固定为 ubuntu-24.04，而不是 ubuntu-latest：GitHub 会把 latest 迁移到新版本，
+# 工具版本一变，一条原本绿色的流水线可能毫无征兆地变红。固定之后，什么时候升级由我们自己决定。
+# Actions 用的是最新大版本（v7，运行在 Node 24 上；v4/v5 运行在已弃用的 Node 20 上，会产生警告）。
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -49,8 +52,8 @@ jobs:
       # 数据库没起来时，依赖它的测试必须【失败】而不是被悄悄跳过（见 tests/db_guard.py）。
       REQUIRE_DB: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"   # 和 Dockerfile 的基础镜像保持一致
           cache: pip
@@ -65,14 +68,14 @@ jobs:
           done | tee -a "$GITHUB_STEP_SUMMARY"
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22   # 和 frontend/Dockerfile 的基础镜像保持一致
           cache: npm
@@ -84,24 +87,24 @@ jobs:
       - run: npm run build
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build the images, start the whole stack and check it
         run: python3 scripts/smoke_test_stack.py   # 只用标准库，不需要装依赖
 
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     continue-on-error: true    # 不阻塞：见文件开头的说明
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - run: python -m pip install pip-audit && pip-audit -r requirements-prod.txt
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: npm audit --omit=dev

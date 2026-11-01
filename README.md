@@ -1,31 +1,49 @@
 # Infra Debugging Agent
 
-An AI agent that investigates production incidents. Given a Jira ticket, it queries logs, recent deployments and runbooks, compares root-cause hypotheses, and returns an **evidence-backed RCA report**.
+![CI](https://github.com/melofo/infra-debugging-agent/actions/workflows/ci.yml/badge.svg)
 
-> Status: work in progress (backend + agent core done; chat UI, Jira webhook, real integrations and deployment are planned).
-> Version 1 is **read-only**: the agent can only query data, never change anything.
+An AI agent that investigates production incidents. Given a Jira ticket (or a chat message), it queries logs, recent deployments, runbooks and past incidents, compares root-cause hypotheses and returns an **evidence-backed RCA report**, where every cited piece of evidence is verified against what the tools actually returned. It is **read-only**: it can only *propose* a Jira comment, which a human must approve.
 
-## What works today
+Portfolio project built to practice production-grade LLM agent engineering: reliability, security, evaluation and operations, not just a demo. Data sources are **simulated** (JSON scenarios); everything around the agent is real.
 
-- `POST /investigate` runs the agent on a simulated incident (`data/scenarios/bug-1042.json`) and returns the report, every tool call it made, and token/latency stats.
-- Two interchangeable agent implementations, selectable with `mode`:
-  - `loop` – a hand-written tool-calling loop (`app/agent/loop.py`): every step is visible and controllable.
-  - `sdk` – the Google GenAI SDK's automatic function calling (`app/agent/sdk_afc.py`): much shorter, but the loop is a black box.
-- **Sessions with follow-up questions** – the first message of a session runs the investigation; later messages continue the same agent loop with the full history (including earlier tool results), so follow-ups are answered from data already gathered.
-  - `POST /sessions` → create a session
-  - `POST /sessions/{id}/messages` → send a message, get the whole turn as JSON
-  - `POST /sessions/{id}/messages/stream` → same, but streamed as Server-Sent Events (`step` events while the agent works, then one `turn` event)
-  - `GET /sessions/{id}` → transcript
-  - Safeguards: one message at a time per session (409 otherwise), failed turns are rolled back, turn and session count limits.
-- `POST /chat` – plain LLM chat; `GET /health` – liveness check.
+## At a glance
 
-## Design notes
+| Area | What is there |
+|---|---|
+| Agent | Hand-written tool-calling loop (plus an SDK variant for comparison), Gemini behind a provider-agnostic interface, tools exposed and consumed over **MCP** (stdio and authenticated Streamable HTTP) |
+| Trust | **Evidence grounding** checked in code (a reference must appear verbatim in a successful tool result of the right kind), strict tool allowlist, MCP server treated as untrusted |
+| Safety | API keys with roles (hashed, uniform 401, fail closed), HMAC-signed Jira webhook, **human approval** for write actions with content-hash binding, append-only audit log |
+| Backend | FastAPI, PostgreSQL + pgvector, durable job queue (`SKIP LOCKED`, fencing, backoff), Postgres-backed chat sessions with lease + versioning, SSE streaming |
+| Retrieval | Chunked runbooks and past incidents, vector search (HNSW cosine), retrieval evaluation against BM25 and hybrid |
+| Evaluation | 36 generated incident scenarios, deterministic scorer, no-LLM baselines, held-out set, paired comparison with a sign test |
+| Operations | OpenTelemetry traces and metrics, Docker (non-root, graceful shutdown), compose stack, CI on GitHub Actions, container smoke test |
+| Frontend | Next.js chat UI with live agent steps, automatic-investigation pages, approvals page |
 
-- **Evidence is enforced by code, not by prompt.** A hypothesis without at least one piece of evidence cannot be constructed (`app/schemas.py`); an invalid report is sent back to the model to fix.
-- **The model only proposes; the backend executes.** Tools go through an allowlist registry with validated arguments and capped result sizes (`app/agent/tools.py`).
-- **Provider-agnostic LLM layer** (`app/llm/base.py`); Gemini is the first implementation.
-- **Ground truth is kept apart from the data the tools can read**, so the agent can later be evaluated fairly.
-- Tests use scripted fake LLMs: no network, no cost, deterministic.
+```
+Jira webhook --HMAC--> job queue (Postgres) --> worker --+
+Chat UI --API key--> FastAPI --------------------------- +--> agent loop (Gemini)
+                                                              |  tools: tickets, logs, deploys, runbooks,
+                                                              |         knowledge search (pgvector), list_services
+                                                              |  every report: evidence grounding check
+                                                              v
+                          RCA report --> proposed Jira comment --> human approval --> posted (audit log)
+```
+
+## Results
+
+Measured, with their limits stated. Details in *End-to-end evaluation* below.
+
+| What | Result |
+|---|---|
+| Reference lines on 30 dev scenarios (no model) | oracle 100%, "blame the latest deploy" 20%, "copy the runbook" 0%, "echo the ticket" 0% |
+| Gemini, original agent (v1), dev set | 24/30 Top-1 (80%); 15/15 when a deploy caused it, 9/15 otherwise |
+| Gemini, improved agent (v2), dev set | 30/30, but the scorer was adjusted after seeing outputs, so treat it as optimistic |
+| Held-out set (6 unseen incident types, 3 runs each) | v1 0/18, v2 18/18 (paired sign test p = 0.031); cause confirmed: v2 searches the other service's logs in 18/18 vs 0/18 |
+| Cost of v2 | about +21% input tokens per investigation, latency about the same |
+| Retrieval (35 labeled queries) | vector search hit@3 1.00 vs BM25 0.80; on queries sharing almost no words with their answer 1.00 vs 0.25 |
+| Tests | 689 backend and 45 frontend tests, mutation-checked; CI green |
+
+Caveats: the scenarios are synthetic and come from one generator, 30 cases give wide intervals, keyword scoring is coarse, and the step-budget control run failed because of a Gemini quota error. Numbers are good for comparing versions of this agent, not for claiming real-world accuracy.
 
 ## Run locally
 
@@ -46,7 +64,18 @@ GEMINI_MODEL=a-gemini-model-id-available-to-you
 # LOG_LEVEL=INFO
 # LLM_TIMEOUT_SECONDS=30
 # LLM_MAX_ATTEMPTS=4      # attempts on 429/503, with exponential backoff
-# AGENT_MAX_STEPS=8
+# AGENT_VARIANT=v2        # v2 = list_services tool + "beyond deploys" prompt; v1 = previous behavior
+# AGENT_MAX_STEPS=12
+# AUTH_REQUIRED=true      # set false only for purely local experiments (then no API key is needed)
+```
+
+`scripts/check_env.py` verifies the `.env` is read correctly without printing any secret.
+
+**First run:** the API requires an API key (see *API authentication*). Either set `AUTH_REQUIRED=false` in `.env` for a quick look, or start the database and create a key:
+
+```bash
+docker compose up -d db
+.venv/bin/python scripts/manage_api_keys.py create --name me --role admin    # shown once; paste it in the web UI's top bar
 ```
 
 Start the server and open the interactive docs at http://127.0.0.1:8000/docs:
@@ -55,15 +84,18 @@ Start the server and open the interactive docs at http://127.0.0.1:8000/docs:
 uvicorn app.main:app --reload
 ```
 
-Run the tests (no API key needed):
+Run the tests (no API key needed, and the test environment never has one):
 
 ```bash
-pytest
+pytest                 # database tests are skipped if PostgreSQL is not running
+docker compose up -d db && REQUIRE_DB=1 pytest    # the full suite, as CI runs it
 ```
+
+Without any keys or Docker you can still run the free evaluation baselines: `python scripts/eval_agent.py --llm oracle`.
 
 ## Database
 
-PostgreSQL (with the pgvector extension, used later for runbook retrieval) runs in Docker. It stores the investigation job queue used by the Jira webhook flow.
+PostgreSQL (with the pgvector extension, used for runbook retrieval) runs in Docker. It stores the investigation job queue, chat sessions, API keys, write-action proposals and the audit log.
 
 ```bash
 docker compose up -d db      # start (127.0.0.1:5432 only)
@@ -76,7 +108,7 @@ Database integration tests use a separate `agent_test` database, refuse to run a
 
 ## Jira webhook
 
-`POST /webhooks/jira` receives Jira Cloud "issue created" events for Bugs and queues an investigation job (the job worker is added in a later step). It follows Jira's documented behaviour: the body is signed with HMAC-SHA256 (`X-Hub-Signature: sha256=<hex>`) and `X-Atlassian-Webhook-Identifier` identifies a delivery across retries.
+`POST /webhooks/jira` receives Jira Cloud "issue created" events for Bugs and queues an investigation job. It follows Jira's documented behaviour: the body is signed with HMAC-SHA256 (`X-Hub-Signature: sha256=<hex>`) and `X-Atlassian-Webhook-Identifier` identifies a delivery across retries.
 
 - Set `JIRA_WEBHOOK_SECRET` to the secret configured on the Jira webhook. Without it the endpoint refuses everything (fail closed).
 - The signature is verified over the raw body with a constant-time comparison before anything else is parsed or stored.
@@ -107,7 +139,7 @@ Then open http://localhost:3000/jobs to watch the job go Queued, Running, Done. 
 - The UI has an "Automatic investigations" page (`/jobs`, polling every 3 seconds) and a detail page (`/jobs/<id>`) that stops polling once the job is finished.
 - Error messages stored on jobs are user-facing: they never contain server paths or internal exception text (details go to the server log only).
 
-## Knowledge base (RAG, in progress)
+## Knowledge base (RAG)
 
 `data/knowledge/` holds runbooks and past incident write-ups (Markdown with YAML front matter). They are split into heading-based chunks (`app/rag/chunking.py`), turned into 768-dimension vectors (`app/rag/embedder.py`: Gemini embeddings, or an offline hash embedder for tests and key-less development via `EMBEDDING_PROVIDER=hash`) and stored in PostgreSQL with pgvector (`app/schema_knowledge.sql`, HNSW cosine index). Load it with `scripts/ingest_knowledge.py` (idempotent: unchanged documents are skipped and never re-embedded; `--dry-run` shows the plan; `--embedder hash` works offline). Ingestion computes all vectors first and then switches the database in one transaction, so a failure never leaves a half-updated knowledge base. Search it with `scripts/search_knowledge.py "your question"`: it embeds the question, finds the nearest chunks by cosine distance (HNSW index) and applies optional filters (document type, service). The agent uses it through the `search_knowledge` tool (runbooks and past incidents, cited by document id); when the knowledge base is not ingested or pgvector is unavailable it falls back to the keyword runbook search, and the next investigation picks the knowledge base up automatically after ingestion. Without the pgvector extension the app still starts; only semantic search is unavailable.
 
@@ -168,7 +200,7 @@ To avoid fooling ourselves: 6 **held-out** scenarios (`--split holdout`: autosca
 
 `.github/workflows/ci.yml` runs on every push and pull request, with no secrets and read-only permissions: **backend** (the test suite against a real pgvector Postgres service, then the free evaluation baselines in the job summary), **frontend** (`npm ci`, lint, type check, tests, production build), **docker** (builds both images, starts the whole stack and runs `scripts/smoke_test_stack.py`, the same script you can run locally; it checks health, auth, CORS, session persistence across a restart, the separate worker, the frontend bundle, non-root, no `.env` in the image, and graceful shutdown) and a non-blocking dependency **audit**. A missing CI database fails the tests (`REQUIRE_DB=1`) instead of silently skipping them. Static tests pin the workflow's safety properties (least privilege, official actions only, no `pull_request_target`, image and runtime versions equal to the Dockerfiles').
 
-Honest status: the workflow has not run on GitHub yet; I ran every command it contains locally, in the same order, and the smoke test for real (and confirmed it fails when graceful shutdown is broken). Actions are pinned to major version tags, not commit SHAs; pinning SHAs is the stricter supply-chain choice.
+Honest status: the first real run on GitHub went red in two places that had passed locally, both because something existed only in my working directory: a test that silently relied on the real model key in my local `.env` (a request returned 503 before the ownership check when no key was configured), and a type check that needs Next's generated route types, which a fresh checkout does not have. Fixes: tests now run with the model credentials blanked (so a local run equals CI and no test can call the real model), and `npm run typecheck` runs `next typegen` first. The second run was green on all four jobs. To catch this class of problem before pushing, validate in a clean export of the committed files (no `.env`, no generated files). Actions are pinned to major version tags, not commit SHAs; pinning SHAs is the stricter supply-chain choice.
 
 ## Docker and deployment
 
@@ -217,7 +249,7 @@ To make the agent use a remote server: `TOOL_SOURCE=mcp-http`, `MCP_HTTP_URL=htt
 
 ## API authentication
 
-Every endpoint except `/health` and the HMAC-signed `/webhooks/jira` needs `Authorization: Bearer agk_<id>.<secret>`. Keys have roles (`viewer` reads jobs, `operator` also runs investigations and chat, `admin` also decides approvals later) and are managed by a CLI, not an HTTP endpoint:
+Every endpoint except `/health` and the HMAC-signed `/webhooks/jira` needs `Authorization: Bearer agk_<id>.<secret>`. Keys have roles (`viewer` reads jobs, `operator` also runs investigations and chat, `admin` also approves write actions) and are managed by a CLI, not an HTTP endpoint:
 
 ```bash
 .venv/bin/python scripts/manage_api_keys.py create --name alice --role operator --expires-in-days 90   # key shown once
@@ -239,16 +271,41 @@ Limits: a size cap per session, a per-user session cap (oldest removed), and ses
 
 ## Chat UI
 
-A Next.js front end lives in `frontend/` (see `frontend/README.md`). With the backend running:
+A Next.js front end lives in `frontend/` (see `frontend/README.md`): the chat with live agent steps and the report card, the automatic-investigation pages (`/jobs`) and the approvals page (`/approvals`). With the backend running:
 
 ```bash
-cd frontend && npm install && npm run dev   # http://localhost:3000
+cd frontend && npm install && npm run dev   # http://localhost:3000; paste your API key in the top bar
 ```
 
 The backend allows browser calls from `http://localhost:3000` by default (CORS allowlist, configurable with `CORS_ORIGINS`).
 
+## Project layout
+
+```
+app/                 FastAPI backend
+  agent/             tool-calling loop, tools, evidence grounding, report schema
+  api/               HTTP endpoints (chat, sessions, jobs, webhook, approvals, investigate)
+  rag/               chunking, embeddings, ingestion, retrieval, retrieval evaluation
+  evals/             scenario generator, scorer, baselines, harness, paired comparison
+  llm/               provider-agnostic LLM interface, Gemini client, message codec
+  auth.py, actions.py, sessions.py, jobs.py, worker.py, telemetry.py, mcp_*.py, tool_sources.py
+frontend/            Next.js UI
+scripts/             operations and evaluation CLIs (key management, worker, ingestion, eval, smoke test, ...)
+data/                simulated scenarios, knowledge base documents, evaluation queries
+docs/deployment.md   container verification, production settings, Cloud Run guide
+tests/               pytest suite (real PostgreSQL where it matters, scripted fake LLMs elsewhere)
+```
+
+## Testing approach
+
+Fake LLMs make the suite deterministic and free (and the test environment has the model credentials blanked, so no test can call the real model). Database behavior is tested against a real PostgreSQL. Safety-relevant code was **mutation-checked**: break one line at a time and confirm a test fails; this found several weak tests that had passed on the first run. Evaluation and its scoring have their own tests (answerability, leakage, anti-gaming, frozen real-model answers). CI validates every push; a smoke test runs the real containers.
+
 ## Known limitations
 
-- No rate limiting yet. Authentication is API-key based (see *API authentication*); the key lives in `sessionStorage` in the browser, which is a first-version simplification (an HttpOnly cookie session would be stronger).
-- Data sources are simulated JSON files; real Jira / log / Git connectors are planned.
-- Free-tier Gemini quotas (about 5 requests/minute) can throttle multi-step investigations.
+- Data sources are simulated JSON files; real Jira / log / Git connectors do not exist. The agent, safety and evaluation machinery is built against the tool interface, so only the tool back ends would change.
+- Evaluation numbers come from synthetic scenarios and a keyword scorer (adjusted twice after seeing outputs); the held-out set is small. See the caveats under *Results*.
+- No rate limiting. The API key lives in `sessionStorage` in the browser (an HttpOnly cookie session would be stronger). Sessions do not use MCP.
+- Jira write-back posts to a simulated outbox; a crash exactly while posting leaves the action in `executing` for a human to check.
+- Cloud Run deployment is documented in `docs/deployment.md` but was never executed. No load test, no image vulnerability scan, floating base-image tags, no schema migration tool (tables are created idempotently).
+- Free-tier Gemini quotas can throttle multi-step investigations and evaluation runs (a control run was lost to a 429).
+- Authentication uses one shared database; there is no per-tenant isolation beyond session ownership.

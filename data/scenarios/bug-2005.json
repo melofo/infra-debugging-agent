@@ -120,7 +120,7 @@
       "tls|ssl|handshake"
     ],
     "must_have": [
-      "2026-08-31|notafter|not after|expired on|expiry date|expiration date"
+      "2026-08-31|notafter|not after|expired on|expiry date|expiration date|handshake exception|handshake failure|pkix"
     ],
     "category": "expired_certificate",
     "culprit_references": [

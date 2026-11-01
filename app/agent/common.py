@@ -45,10 +45,12 @@ the source runbook or incident.
 Do not use 1.0: you cannot be completely certain from logs alone.
 - Never invent data. If you lack information, say so in the summary."""
 
-# 第二版提示词（实验中）：在原来的基础上，多一段"不要只看发布"的通用方法。
+# 第二版提示词（现在是默认）：在原来的基础上，多一段"不要只看发布"的通用方法。
 # 它来自评估的发现：模型很擅长"找出是哪次发布出的问题"，但发布不能解释症状时，它不会去查别的服务里记录的
 # 配置、开关、密钥变更。这段话是通用的排查原则，没有提到评估里的任何具体场景。
-# 是否采用，要看评估数据（开发集和从未调过的留出集都变好才算），所以默认仍然是 SYSTEM_PROMPT。
+# 采用的依据（见 README "Evaluation-driven improvement"）：留出集（没调过的新题型）上 0/18 -> 18/18，
+# 开发集 24/30 -> 30/30，并且验证了机制：它去查关键服务日志的比例从 2/6、0/18 变成 6/6、18/18。
+# 代价：每次调查约多 21% 的输入 token。v1 保留，AGENT_VARIANT=v1 可以随时切回。
 SYSTEM_PROMPT_V2 = SYSTEM_PROMPT + """
 
 Beyond deploys:
@@ -58,6 +60,19 @@ certificates, infrastructure and traffic. Such changes are often logged by a \
 different service than the one that is failing, so call list_services to see what exists and search the \
 logs of the services that look related. Do not stop at the first error message: ask what changed just \
 before it started, and prefer the change over its symptom as the root cause."""
+
+@dataclass(frozen=True)
+class AgentVariant:
+    """agent 的配置：用哪段系统提示词、有没有服务目录工具。评估（对照实验）和线上用的是同一份定义。"""
+
+    prompt: str
+    service_discovery: bool
+
+
+AGENT_VARIANTS = {
+    "v1": AgentVariant(SYSTEM_PROMPT, service_discovery=False),
+    "v2": AgentVariant(SYSTEM_PROMPT_V2, service_discovery=True),
+}
 
 SUBMIT_TOOL_NAME = "submit_rca_report"
 
@@ -84,12 +99,12 @@ def submit_spec() -> ToolSpec:
     )
 
 
-def session_system_prompt(ticket_id: str) -> str:
+def session_system_prompt(ticket_id: str, variant: str = "v1") -> str:
     """会话专用的系统提示词：在通用提示词后面补上"这个会话在调查哪张工单"。
 
     这样用户的第一句话即使没写工单号（例如只说"开始调查"），模型也知道该查哪一个。
     """
-    return f"{SYSTEM_PROMPT}\n\nThis conversation is about ticket {ticket_id}."
+    return f"{AGENT_VARIANTS[variant].prompt}\n\nThis conversation is about ticket {ticket_id}."
 
 
 def build_report(ticket_id: str, args: SubmitRCAArgs) -> RCAReport:

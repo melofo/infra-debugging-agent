@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import uvicorn  # noqa: E402
 from mcp.server.stdio import stdio_server  # noqa: E402
 
+from app.agent.common import AGENT_VARIANTS  # noqa: E402
 from app.agent.tools import build_investigation_tools  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.db import create_pool, init_schema  # noqa: E402
@@ -68,7 +69,8 @@ async def run(args: argparse.Namespace) -> int:
             return 3
 
     try:
-        server = build_mcp_server(build_investigation_tools(scenario, knowledge))
+        discovery = AGENT_VARIANTS[args.agent_variant].service_discovery
+        server = build_mcp_server(build_investigation_tools(scenario, knowledge, service_discovery=discovery))
         logger.info("mcp server starting", extra={"scenario": args.scenario, "knowledge": knowledge is not None})
         if args.transport == "http":
             try:
@@ -93,6 +95,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the investigation tools as an MCP server over stdio.")
     parser.add_argument("--scenario", default="bug-1042", help="which simulated incident's data to serve")
     parser.add_argument("--knowledge", action="store_true", help="serve semantic knowledge search (needs the database)")
+    parser.add_argument(
+        "--agent-variant", choices=["v1", "v2"], default=Settings().agent_variant,
+        help="v2 also exposes the list_services tool (default: the AGENT_VARIANT setting)",
+    )
     parser.add_argument("--transport", choices=["stdio", "http"], default="stdio")
     parser.add_argument("--host", default="127.0.0.1", help="http only. Default is localhost; exposing it needs TLS in front")
     parser.add_argument("--port", type=int, default=8765, help="http only")

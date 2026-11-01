@@ -35,7 +35,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import telemetry
-from app.agent.common import AgentError, StepRecord, session_system_prompt
+from app.agent.common import AGENT_VARIANTS, AgentError, StepRecord, session_system_prompt
 from app.auth import Principal, require_scope
 from app.agent.loop import InvestigationAgent
 from app.agent.tools import build_investigation_tools
@@ -89,9 +89,12 @@ async def create_session(
         raise HTTPException(status_code=404, detail=f"scenario not found: {request.scenario}")
     # 会话创建时决定用不用知识库检索；整个会话期间工具集保持不变，对话历史里的工具调用才前后一致。
     knowledge = await active_knowledge_base(getattr(http_request.app.state, "knowledge", None))
-    registry = build_investigation_tools(scenario, knowledge)
+    # 新会话用当前配置的 agent 版本，并记下来：以后恢复会话、每一轮对话都按创建时的版本，工具集不会中途变化。
+    variant = get_settings().agent_variant
+    registry = build_investigation_tools(scenario, knowledge, service_discovery=AGENT_VARIANTS[variant].service_discovery)
     session = await store.create(
-        request.scenario, scenario.ticket.id, registry, owner=principal.name, uses_knowledge=knowledge is not None
+        request.scenario, scenario.ticket.id, registry, owner=principal.name,
+        uses_knowledge=knowledge is not None, agent_variant=variant,
     )
     return _to_out(session)
 
@@ -231,7 +234,7 @@ async def _run_session_turn(
         llm,
         session.registry,
         max_steps=settings.agent_max_steps,
-        system_prompt=session_system_prompt(session.ticket_id),
+        system_prompt=session_system_prompt(session.ticket_id, session.agent_variant),
     )
     # 会话 id 是"知道它就能访问会话"的凭证，不能原样写进追踪（有追踪权限的人就都能访问会话了）：只记哈希前缀。
     with telemetry.span(

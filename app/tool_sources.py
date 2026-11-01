@@ -17,6 +17,7 @@ from pathlib import Path
 
 from mcp.client.stdio import StdioServerParameters
 
+from app.agent.common import AGENT_VARIANTS
 from app.agent.tools import ToolProvider, build_investigation_tools
 from app.config import Settings
 from app.mcp_client import bearer_http_transport, connect_mcp
@@ -30,8 +31,10 @@ MCP_SERVER_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "mcp_serve
 KNOWLEDGE_ENV_VARS = ("DATABASE_URL", "GEMINI_API_KEY", "EMBEDDING_PROVIDER", "EMBEDDING_MODEL")
 
 
-def stdio_parameters(scenario_name: str, with_knowledge: bool, environ: dict[str, str]) -> StdioServerParameters:
-    args = [str(MCP_SERVER_SCRIPT), "--scenario", scenario_name]
+def stdio_parameters(
+    scenario_name: str, with_knowledge: bool, environ: dict[str, str], agent_variant: str = "v1"
+) -> StdioServerParameters:
+    args = [str(MCP_SERVER_SCRIPT), "--scenario", scenario_name, "--agent-variant", agent_variant]
     env: dict[str, str] = {}
     if with_knowledge:
         args.append("--knowledge")
@@ -47,19 +50,22 @@ async def open_tools(
     knowledge: KnowledgeBase | None,
     environ: dict[str, str] | None = None,
 ) -> AsyncIterator[ToolProvider]:
+    discovery = AGENT_VARIANTS[settings.agent_variant].service_discovery
     if settings.tool_source == "direct":
-        yield build_investigation_tools(scenario, knowledge)
+        yield build_investigation_tools(scenario, knowledge, service_discovery=discovery)
         return
 
     if settings.tool_source == "mcp-memory":
-        target = build_mcp_server(build_investigation_tools(scenario, knowledge))
+        target = build_mcp_server(build_investigation_tools(scenario, knowledge, service_discovery=discovery))
     elif settings.tool_source == "mcp-http":
         # 远程服务端自己决定数据（场景、知识库）；这里只带上凭证。
         target = bearer_http_transport(settings.mcp_http_url, settings.mcp_api_key.get_secret_value())
     else:  # mcp-stdio
         import os
 
-        target = stdio_parameters(scenario_name, knowledge is not None, environ if environ is not None else dict(os.environ))
+        target = stdio_parameters(
+            scenario_name, knowledge is not None, environ if environ is not None else dict(os.environ), settings.agent_variant
+        )
 
     async with connect_mcp(target, call_timeout=settings.mcp_call_timeout_seconds) as tools:
         yield tools

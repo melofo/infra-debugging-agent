@@ -32,7 +32,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from app import actions, jobs, telemetry
-from app.agent.common import AgentError, InvestigationResult
+from app.agent.common import AGENT_VARIANTS, AgentError, InvestigationResult
 from app.agent.loop import InvestigationAgent
 from app.config import Settings
 from app.jobs import Job
@@ -204,7 +204,9 @@ class Worker:
         # 工具来源由配置决定（直接调用 / MCP）。连接在这个 async with 里打开和关闭，
         # 而 process() 在同一个任务里调用它：MCP 客户端要求"在哪个任务进入，就在同一个任务退出"。
         async with open_tools(self._settings, job.scenario, scenario, knowledge) as tools:
-            agent = InvestigationAgent(self._llm, tools, max_steps=self._settings.agent_max_steps)
+            agent = InvestigationAgent(
+                self._llm, tools, max_steps=self._settings.agent_max_steps, system_prompt=AGENT_VARIANTS[self._settings.agent_variant].prompt
+            )
             return await agent.investigate(job.ticket_id)
 
     async def _propose_writeback(self, job: Job, result: InvestigationResult) -> None:

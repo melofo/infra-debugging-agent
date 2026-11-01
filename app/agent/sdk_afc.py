@@ -29,10 +29,13 @@ from app.llm.gemini import GeminiClient
 
 
 class SdkAfcAgent:
-    def __init__(self, llm: GeminiClient, registry: ToolRegistry, max_remote_calls: int = 8):
+    def __init__(
+        self, llm: GeminiClient, registry: ToolRegistry, max_remote_calls: int = 8, system_prompt: str = SYSTEM_PROMPT
+    ):
         self._llm = llm
         self._registry = registry
         self._max_remote_calls = max_remote_calls
+        self._system_prompt = system_prompt
 
     async def investigate(self, ticket_id: str) -> InvestigationResult:
         start = time.perf_counter()
@@ -144,7 +147,7 @@ class SdkAfcAgent:
                 search_knowledge if "search_knowledge" in self._registry.names() else search_runbooks,
                 submit_rca_report,
             ],
-            system=SYSTEM_PROMPT,
+            system=self._system_prompt,
             max_remote_calls=self._max_remote_calls,
         )
 

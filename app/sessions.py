@@ -32,6 +32,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, TypeAdapter
 
 from app.agent.common import StepRecord
+from app.agent.common import AGENT_VARIANTS
 from app.agent.tools import ToolRegistry, build_investigation_tools
 from app.llm.base import Message
 from app.llm.codec import message_from_json, message_to_json
@@ -69,6 +70,9 @@ class Session:
     # 否则知道别人的会话 id 就能读到别人的整段对话，这就是 IDOR（不安全的直接对象引用）漏洞。
     owner: str = "anonymous-dev"
     uses_knowledge: bool = False  # 创建时有没有启用知识库检索（恢复会话时要按同样的方式重建工具）
+    # 创建时用的 agent 配置（v1/v2）。和 uses_knowledge 同理：一个会话的工具集在整个生命周期里必须不变，
+    # 否则历史里已经调用过 list_services 的会话，换回 v1 之后就找不到这个工具了。
+    agent_variant: str = "v1"
     version: int = 0  # 数据库里的版本号（乐观锁）；内存存储用不到
     lease_token: str | None = None  # 持有租约时的令牌（数据库存储用）
     messages: list[Message] = field(default_factory=list)
@@ -102,7 +106,13 @@ class SessionStorage(Protocol):
     """会话存储的接口。接口层（app/api/sessions.py）只依赖它，不关心背后是内存还是数据库。"""
 
     async def create(
-        self, scenario_name: str, ticket_id: str, registry: ToolRegistry, owner: str, uses_knowledge: bool = False
+        self,
+        scenario_name: str,
+        ticket_id: str,
+        registry: ToolRegistry,
+        owner: str,
+        uses_knowledge: bool = False,
+        agent_variant: str = "v1",
     ) -> Session: ...
 
     async def get(self, session_id: str) -> Session | None: ...
@@ -130,12 +140,19 @@ class SessionStore:
         self._max_sessions = max_sessions
 
     async def create(
-        self, scenario_name: str, ticket_id: str, registry: ToolRegistry, owner: str = "anonymous-dev", uses_knowledge: bool = False
+        self,
+        scenario_name: str,
+        ticket_id: str,
+        registry: ToolRegistry,
+        owner: str = "anonymous-dev",
+        uses_knowledge: bool = False,
+        agent_variant: str = "v1",
     ) -> Session:
         # 会话 id 必须不可猜（纵深防御；真正的访问控制是 owner 检查，见 app/api/sessions.py 的 _find_session）。
         # secrets 模块生成的是密码学安全的随机数；random 模块不行，它的输出是可预测的。
         session = Session(
-            secrets.token_urlsafe(16), scenario_name, ticket_id, registry, owner, uses_knowledge=uses_knowledge
+            secrets.token_urlsafe(16), scenario_name, ticket_id, registry, owner,
+            uses_knowledge=uses_knowledge, agent_variant=agent_variant,
         )
         self._sessions[session.id] = session
         while len(self._sessions) > self._max_sessions:
@@ -172,10 +189,10 @@ class SessionStore:
 # ---------------------------------------------------------------------------
 # 数据库实现
 # ---------------------------------------------------------------------------
-RegistryFactory = Callable[[str, bool], Awaitable[ToolRegistry]]
+RegistryFactory = Callable[[str, bool, str], Awaitable[ToolRegistry]]  # (场景, 是否用知识库, agent 配置)
 _TURNS = TypeAdapter(list[Turn])
 
-_COLUMNS = "id, owner, scenario, ticket_id, uses_knowledge, messages, turns, report, version"
+_COLUMNS = "id, owner, scenario, ticket_id, uses_knowledge, messages, turns, report, version, agent_variant"
 
 
 class PostgresSessionStore:
@@ -195,9 +212,9 @@ class PostgresSessionStore:
         self._max_bytes = max_bytes
 
     async def _to_session(self, row: tuple, lease_token: str | None = None) -> Session:
-        sid, owner, scenario, ticket_id, uses_knowledge, messages, turns, report, version = row
+        sid, owner, scenario, ticket_id, uses_knowledge, messages, turns, report, version, agent_variant = row
         # 工具不能存进数据库（它们是代码），按创建时的方式重建；重建不出来（比如知识库现在不可用）就抛 SessionUnavailable。
-        registry = await self._registry_factory(scenario, uses_knowledge)
+        registry = await self._registry_factory(scenario, uses_knowledge, agent_variant)
         return Session(
             id=sid,
             scenario_name=scenario,
@@ -205,6 +222,7 @@ class PostgresSessionStore:
             registry=registry,
             owner=owner,
             uses_knowledge=uses_knowledge,
+            agent_variant=agent_variant,
             version=version,
             lease_token=lease_token,
             messages=[message_from_json(m) for m in messages],
@@ -213,13 +231,20 @@ class PostgresSessionStore:
         )
 
     async def create(
-        self, scenario_name: str, ticket_id: str, registry: ToolRegistry, owner: str = "anonymous-dev", uses_knowledge: bool = False
+        self,
+        scenario_name: str,
+        ticket_id: str,
+        registry: ToolRegistry,
+        owner: str = "anonymous-dev",
+        uses_knowledge: bool = False,
+        agent_variant: str = "v1",
     ) -> Session:
         session_id = secrets.token_urlsafe(16)
         async with self._pool.connection() as conn:
             await conn.execute(
-                "INSERT INTO chat_sessions (id, owner, scenario, ticket_id, uses_knowledge) VALUES (%s, %s, %s, %s, %s)",
-                (session_id, owner, scenario_name, ticket_id, uses_knowledge),
+                "INSERT INTO chat_sessions (id, owner, scenario, ticket_id, uses_knowledge, agent_variant) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (session_id, owner, scenario_name, ticket_id, uses_knowledge, agent_variant),
             )
             # 每个用户最多保留 max_per_owner 个，超出的最旧的删掉（和内存版"淘汰最旧"的语义一致，但不会让一个用户挤掉别人的）。
             await conn.execute(
@@ -227,7 +252,9 @@ class PostgresSessionStore:
                 "(SELECT id FROM chat_sessions WHERE owner = %s ORDER BY updated_at DESC, created_at DESC LIMIT %s)",
                 (owner, owner, self._max_per_owner),
             )
-        return Session(session_id, scenario_name, ticket_id, registry, owner, uses_knowledge=uses_knowledge)
+        return Session(
+            session_id, scenario_name, ticket_id, registry, owner, uses_knowledge=uses_knowledge, agent_variant=agent_variant
+        )
 
     async def get(self, session_id: str) -> Session | None:
         async with self._pool.connection() as conn:
@@ -311,7 +338,7 @@ class PostgresSessionStore:
 def make_registry_factory(get_knowledge: Callable[[], Awaitable[object | None]]) -> RegistryFactory:
     """生成"恢复会话时重建工具"的函数。get_knowledge 返回当前可用的知识库（没有就返回 None）。"""
 
-    async def build(scenario_name: str, uses_knowledge: bool) -> ToolRegistry:
+    async def build(scenario_name: str, uses_knowledge: bool, agent_variant: str = "v1") -> ToolRegistry:
         try:
             scenario = load_scenario(scenario_name)
         except (FileNotFoundError, ValueError):
@@ -323,7 +350,7 @@ def make_registry_factory(get_knowledge: Callable[[], Awaitable[object | None]])
                 # 这个会话的历史里已经有知识库检索的调用，工具集必须和当时一致；
                 # 现在知识库不可用的话，宁可明确说"暂时恢复不了"，也不要悄悄换一套工具继续对话。
                 raise SessionUnavailable("the knowledge base this session used is not available")
-        return build_investigation_tools(scenario, knowledge)
+        return build_investigation_tools(scenario, knowledge, service_discovery=AGENT_VARIANTS[agent_variant].service_discovery)
 
     return build
 

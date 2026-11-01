@@ -451,7 +451,7 @@ async def test_cancelling_a_running_request_frees_the_session_and_leaves_history
 
 
 async def test_the_turn_limit_still_applies_after_a_restart(api, pool, monkeypatch):
-    monkeypatch.setattr("app.api.sessions.get_settings", lambda: type("S", (), {"max_turns_per_session": 1, "agent_max_steps": 8})())
+    monkeypatch.setattr("app.api.sessions.get_settings", lambda: type("S", (), {"max_turns_per_session": 1, "agent_max_steps": 8, "agent_variant": "v1"})())
     use_llm(ScriptedLLM([calls(GET_TICKET, ToolCall(SUBMIT_TOOL_NAME, VALID_REPORT_ARGS)), final_text()]))
     session_id = (await api.post("/sessions", json={})).json()["id"]
     assert (await api.post(f"/sessions/{session_id}/messages", json={"message": "a"})).status_code == 200

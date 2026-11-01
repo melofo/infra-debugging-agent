@@ -27,6 +27,7 @@ from opentelemetry.trace import StatusCode  # noqa: E402
 
 from app import telemetry  # noqa: E402
 from app.agent.loop import InvestigationAgent  # noqa: E402
+from app.agent.common import AGENT_VARIANTS  # noqa: E402
 from app.agent.tools import build_investigation_tools  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.evals.baselines import Oracle  # noqa: E402
@@ -82,7 +83,9 @@ async def run(args: argparse.Namespace) -> int:
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     telemetry.use_providers(provider, None)
     try:
-        agent = InvestigationAgent(llm, build_investigation_tools(scenario), max_steps=args.max_steps)
+        config = AGENT_VARIANTS[args.agent]
+        tools = build_investigation_tools(scenario, service_discovery=config.service_discovery)
+        agent = InvestigationAgent(llm, tools, max_steps=args.max_steps, system_prompt=config.prompt)
         try:
             await agent.investigate(scenario.ticket.id)
         except Exception as exc:  # 失败的调查同样有追踪：这正是追踪最有用的时候
@@ -97,7 +100,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run one investigation and print its trace.")
     parser.add_argument("--scenario", default="bug-1042")
     parser.add_argument("--llm", choices=["oracle", "gemini"], default="oracle")
-    parser.add_argument("--max-steps", type=int, default=8)
+    parser.add_argument("--agent", choices=["v1", "v2"], default=Settings().agent_variant)
+    parser.add_argument("--max-steps", type=int, default=Settings().agent_max_steps)
     sys.exit(asyncio.run(run(parser.parse_args())))
 
 

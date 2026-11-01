@@ -20,26 +20,12 @@ import math
 import time
 from dataclasses import asdict, dataclass, field
 
-from app.agent.common import SUBMIT_TOOL_NAME, SYSTEM_PROMPT, SYSTEM_PROMPT_V2, AgentError
+from app.agent.common import AGENT_VARIANTS, SUBMIT_TOOL_NAME, AgentError
 from app.agent.loop import InvestigationAgent
 from app.agent.tools import build_investigation_tools
 from app.evals.scoring import calibration_gap, cites_culprit, correct_rank, percentile
 from app.llm.base import LLMClient, LLMError
 from app.scenario import load_scenario
-
-
-@dataclass(frozen=True)
-class AgentVariant:
-    """被评估的 agent 配置。同一套题用不同配置各跑一遍，才能知道一个改动到底有没有用（对照实验）。"""
-
-    prompt: str
-    service_discovery: bool
-
-
-AGENT_VARIANTS = {
-    "v1": AgentVariant(SYSTEM_PROMPT, service_discovery=False),  # 目前线上的配置
-    "v2": AgentVariant(SYSTEM_PROMPT_V2, service_discovery=True),  # 实验：服务目录 + "不要只看发布"的提示
-}
 
 
 @dataclass

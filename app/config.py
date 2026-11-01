@@ -43,7 +43,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 30.0
     llm_max_attempts: int = 4  # 遇到 429/503 时的最大尝试次数（含第一次）；设为 1 表示不重试
     # Agent 最多调用模型多少轮。硬上限，防止死循环烧钱。
-    agent_max_steps: int = 8
+    agent_max_steps: int = 12  # 评估里 v2 用 12：多查几个服务需要更多的步数（v1 的 8 步在两个案例里用完了）
+    # agent 的配置：v2 = 服务目录工具 + "不要只看发布"的提示词（默认，评估证明更好）；v1 = 原来的配置。
+    agent_variant: Literal["v1", "v2"] = "v2"
     # 数据库连接串。格式：postgresql://用户:密码@主机:端口/库名
     # 默认值对应 docker-compose.yml 里的本地开发数据库（只绑定在本机回环地址，没有真实数据）。
     # 部署到云上时通过环境变量 DATABASE_URL 覆盖，密码来自 Secret Manager，绝不写进代码。

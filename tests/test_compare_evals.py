@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.evals.agent_eval import CaseResult
-from app.evals.compare import compare, format_comparison, sign_test_p_value
+from app.evals.compare import compare, format_comparison, reliability_warnings, sign_test_p_value
 
 
 def r(scenario, top1, repeat=0, category="c"):
@@ -70,3 +70,31 @@ def test_the_cli_compares_two_saved_files_after_rescoring_both(tmp_path):
     assert "newly correct (6)" in result.stdout and "better" in result.stdout  # 6 道全部从错变对：p = 0.0312
     missing = subprocess.run([sys.executable, str(compare_script), str(tmp_path / "nope.jsonl"), str(tmp_path / "good.jsonl")], cwd=tmp_path, env=env, capture_output=True, text=True)
     assert missing.returncode == 2
+
+
+def test_a_run_that_is_mostly_errors_is_flagged_as_not_comparable():
+    quota = [CaseResult(scenario=f"s{i}", category="c", difficulty="easy", has_culprit_deploy=True, status="llm_error", error="429 RESOURCE_EXHAUSTED quota") for i in range(9)]
+    quota.append(r("s9", True))
+    [warning] = reliability_warnings("B", quota)
+    assert "9/10 errored runs" in warning and "429" in warning and "re-run" in warning
+    assert reliability_warnings("A", [r(f"s{i}", i % 2 == 0) for i in range(10)]) == []  # 答错不是出错
+    few_errors = [r(f"s{i}", True) for i in range(9)] + [CaseResult(scenario="s9", category="c", difficulty="easy", has_culprit_deploy=True, status="timeout")]
+    assert reliability_warnings("A", few_errors) == []  # 10% 的出错属于正常波动
+    assert reliability_warnings("A", []) == []
+
+
+def test_the_cli_warns_when_a_file_is_mostly_errors(tmp_path):
+    import json
+
+    good = tmp_path / "good.jsonl"
+    bad = tmp_path / "bad.jsonl"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "eval_agent.py"
+    compare_script = Path(__file__).resolve().parents[1] / "scripts" / "compare_evals.py"
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    subprocess.run([sys.executable, str(script), "--llm", "oracle", "--limit", "5", "--out", str(good)], cwd=tmp_path, env=env, check=True, capture_output=True)
+    rows = [json.loads(line) for line in good.read_text().splitlines()]
+    for row in rows:
+        row.update(status="llm_error", error="429 RESOURCE_EXHAUSTED", top1=False, top3=False, report=None)
+    bad.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    result = subprocess.run([sys.executable, str(compare_script), str(good), str(bad)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0 and "WARNING" in result.stdout and "429" in result.stdout

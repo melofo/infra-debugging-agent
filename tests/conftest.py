@@ -13,6 +13,9 @@ import os
 os.environ["WORKER_ENABLED"] = "false"
 # 同样，自动化测试默认关闭接口认证（环境变量优先于 .env）；专门测认证的测试会显式打开它。
 os.environ["AUTH_REQUIRED"] = "false"
+# 同理：线上默认的 agent 配置是 v2（多一个 list_services 工具和一段提示词），已有的测试断言的是 v1 的工具集和提示词，
+# 所以测试环境默认固定为 v1；专门测 v2 的测试（tests/test_agent_variant.py）会显式传入 v2。
+os.environ["AGENT_VARIANT"] = "v1"
 
 import psycopg
 import pytest

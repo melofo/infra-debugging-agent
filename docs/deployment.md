@@ -55,6 +55,8 @@ Set `ENVIRONMENT=production`. The application then **refuses to start** unless `
 | `JIRA_WEBHOOK_SECRET` | HMAC key for `/webhooks/jira` (fails closed when empty) | secret |
 | `CORS_ORIGINS` | JSON array of the web UI origins | config |
 | `WORKER_ENABLED` | run the worker inside the web process | config |
+| `AGENT_VARIANT` | `v2` (default: `list_services` tool + "beyond deploys" prompt) or `v1` (previous behavior); sessions keep the variant they were created with | config |
+| `AGENT_MAX_STEPS` | model calls allowed per turn (default 12; v2 searches more services) | config |
 | `OTEL_EXPORTER`, `OTEL_ENDPOINT`, `OTEL_SAMPLE_RATIO` | tracing/metrics | config |
 | `OTEL_EXPORTER_OTLP_HEADERS` | OTLP auth headers (standard variable, read by the exporter) | secret |
 | `PORT` | listen port (Cloud Run sets it) | platform |

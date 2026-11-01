@@ -11,7 +11,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.agent.common import AgentError
+from app.agent.common import AGENT_VARIANTS, AgentError
 from app.agent.loop import InvestigationAgent
 from app.agent.sdk_afc import SdkAfcAgent
 from app.api.chat import get_llm_client
@@ -72,10 +72,11 @@ async def investigate(
         # 工具来源（直接调用 / MCP）由服务端配置决定，不由请求决定：
         # 否则任何调用方都能让我们为每个请求启动一个子进程。
         async with open_tools(settings, request.scenario, scenario, knowledge) as tools:
+            prompt = AGENT_VARIANTS[settings.agent_variant].prompt
             if request.mode == "sdk":
-                agent = SdkAfcAgent(llm, tools, max_remote_calls=max_steps)
+                agent = SdkAfcAgent(llm, tools, max_remote_calls=max_steps, system_prompt=prompt)
             else:
-                agent = InvestigationAgent(llm, tools, max_steps=max_steps)
+                agent = InvestigationAgent(llm, tools, max_steps=max_steps, system_prompt=prompt)
             result = await agent.investigate(scenario.ticket.id)
     except LLMError:
         logger.exception("llm call failed during investigation")

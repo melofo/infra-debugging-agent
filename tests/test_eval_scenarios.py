@@ -204,6 +204,8 @@ GEMINI_ANSWERS_THAT_ARE_RIGHT = {
     "bug-2018": "The search-api service experienced a traffic surge leading to public tenant rate limiting and worker queue saturation (queue full at size=2000, causing RejectedExecutionException and 503 errors), without any code changes being deployed.",
     "bug-2028": "The coupon-service experienced request saturation causing its worker queue to fill up (size=2000) and reject requests with 503 RejectedExecutionException, likely due to a traffic surge or increased load since no application code changes were deployed around the time.",
     "bug-2024": "shipping-api is timing out because its downstream dependency rates-service has its thread pool exhausted and cannot respond in time.",
+    # 第二轮评估（v2 配置）里被评分器误判的一个：诊断是对的（证书过期导致握手失败），只是没写出具体的过期日期。
+    "bug-2025": "The SSL certificate for the data-warehouse service expired, causing SSL handshake exceptions and connection failures from reporting-service.",
 }
 GEMINI_ANSWERS_THAT_MISS_THE_ROOT_CAUSE = {
     "bug-2010": "The pricing-api service fails for international customers because the PricingEngineV2 does not support the JPY currency used in their requests.",

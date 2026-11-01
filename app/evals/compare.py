@@ -56,6 +56,24 @@ def _per_scenario(results: list[CaseResult]) -> dict[str, float]:
     return {name: sum(hits) / len(hits) for name, hits in runs.items()}
 
 
+MAX_COMPARABLE_ERROR_RATE = 0.2
+
+
+def reliability_warnings(label: str, results: list[CaseResult]) -> list[str]:
+    """一次运行里出错的案例太多（模型额度用完、服务故障……），它的准确率反映的是"出了多少故障"，不是 agent 的能力。
+    这种结果不能拿来比较：必须明确警告，而不是照常算出一个看起来正常的数字。"""
+    if not results:
+        return []
+    errored = [r for r in results if r.status != "ok"]
+    if len(errored) / len(results) <= MAX_COMPARABLE_ERROR_RATE:
+        return []
+    kinds = sorted({f"{r.status}: {r.error[:60]}" for r in errored})
+    return [
+        f"WARNING: {label} has {len(errored)}/{len(results)} errored runs ({'; '.join(kinds[:2])}). "
+        "Its accuracy reflects failures, not the agent: re-run it (for quota errors, after the quota resets) before comparing."
+    ]
+
+
 def compare(a: list[CaseResult], b: list[CaseResult]) -> Comparison:
     scores_a, scores_b = _per_scenario(a), _per_scenario(b)
     shared = sorted(set(scores_a) & set(scores_b))

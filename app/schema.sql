@@ -151,6 +151,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     -- 创建会话时有没有启用知识库检索。工具集在整个会话期间必须一致（历史里已经有对应的工具调用），
     -- 所以要记下来，恢复会话时按同样的方式重建工具。
     uses_knowledge  boolean     NOT NULL DEFAULT false,
+    -- 创建时的 agent 配置（v1/v2）：会话的工具集在整个生命周期里必须不变，恢复时按它重建。
+    agent_variant   text        NOT NULL DEFAULT 'v1',
     messages        jsonb       NOT NULL DEFAULT '[]',   -- 发给模型的完整历史（含工具结果和厂商原始数据）
     turns           jsonb       NOT NULL DEFAULT '[]',   -- 给界面看的精简记录
     report          jsonb,
@@ -164,4 +166,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now()
 );
+-- 给【已经存在的】旧表补上这一列（CREATE TABLE IF NOT EXISTS 不会改已有的表）。
+-- 旧会话没有记录配置，默认 'v1'：它们创建时确实是 v1 的工具集。
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS agent_variant text NOT NULL DEFAULT 'v1';
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_owner ON chat_sessions (owner, updated_at DESC);

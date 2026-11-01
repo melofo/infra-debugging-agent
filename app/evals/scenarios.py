@@ -167,7 +167,7 @@ def expired_certificate(p: dict) -> Parts:
         ],
         root_cause=f"The TLS certificate used for {p['peer']} expired on {p['expiry']}, so every handshake fails",
         keywords=["certificate|cert ", "expired|expiry|expire", "tls|ssl|handshake"],
-        must_have=[p["expiry"][:10] + "|notafter|not after|expired on|expiry date|expiration date"],
+        must_have=[p["expiry"][:10] + "|notafter|not after|expired on|expiry date|expiration date|handshake exception|handshake failure|pkix"],
         references=[f"Certificate for {p['peer']} expired on {p['expiry']}", "SSLHandshakeException"],
         runbook_title="Connection failures to an upstream service",
         runbook_content="Possible causes: expired or untrusted certificates, DNS problems, firewall changes, the upstream being down. Check the error type: handshake errors point to certificates, connection refused points to the network.",

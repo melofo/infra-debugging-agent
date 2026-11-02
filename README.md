@@ -41,9 +41,18 @@ Measured, with their limits stated. Details in *End-to-end evaluation* below.
 | Held-out set (6 unseen incident types, 3 runs each) | v1 0/18, v2 18/18 (paired sign test p = 0.031); cause confirmed: v2 searches the other service's logs in 18/18 vs 0/18 |
 | Cost of v2 | about +21% input tokens per investigation, latency about the same |
 | Retrieval (35 labeled queries) | vector search hit@3 1.00 vs BM25 0.80; on queries sharing almost no words with their answer 1.00 vs 0.25 |
-| Tests | 701 backend and 45 frontend tests, mutation-checked; CI green |
+| Tests | 715 backend and 45 frontend tests, mutation-checked; CI green |
 
 Caveats: the scenarios are synthetic and come from one generator, 30 cases give wide intervals, keyword scoring is coarse, and the step-budget control run failed because of a Gemini quota error. Numbers are good for comparing versions of this agent, not for claiming real-world accuracy.
+
+## Documentation
+
+| Document | What is in it |
+|---|---|
+| `docs/architecture.md` | component and sequence diagrams, trust boundaries, data model, decisions and trade-offs, failure modes, what would change for production |
+| `docs/evaluation-report.md` | dataset design, scoring, reference lines, results with the real model, cost and latency, retrieval evaluation, threats to validity |
+| `docs/demo-script.md` | a five-minute live demo with commands and what to say |
+| `docs/deployment.md` | containers (verified), production settings, a Cloud Run guide (not executed) |
 
 ## Run locally
 

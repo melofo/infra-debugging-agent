@@ -37,14 +37,46 @@ def build_http_options(timeout_seconds: float, max_attempts: int) -> types.HttpO
     )
 
 
+def build_genai_client(
+    *,
+    api_key: str = "",
+    vertex_project: str = "",
+    vertex_location: str = "",
+    timeout_seconds: float = 30.0,
+    max_attempts: int = 4,
+) -> genai.Client:
+    """创建 Google GenAI SDK 的客户端：对话客户端和向量化器共用，这样两者永远走同一种通道。
+
+    两种通道，调用的是同一批 Gemini 模型，区别在于【怎么证明你是谁】：
+      API key（Google AI Studio）  一串密钥，放在环境变量里；免费额度小，GCP 的 $300 试用金不能用在这里。
+      Vertex AI（Google Cloud）    用服务账号的身份（Application Default Credentials）：没有密钥可以泄露，
+                                   权限由 IAM 控制，费用记在 GCP 账单上，企业客户的标准做法。
+    给了 vertex_project 就走 Vertex AI；否则走 API key。
+    """
+    http_options = build_http_options(timeout_seconds, max_attempts)
+    if vertex_project:
+        # 注意：不能同时传 api_key，SDK 会认为你搞混了。
+        return genai.Client(vertexai=True, project=vertex_project, location=vertex_location or "us-central1", http_options=http_options)
+    return genai.Client(api_key=api_key, http_options=http_options)
+
+
 class GeminiClient:
     def __init__(
-        self, api_key: str, model: str, timeout_seconds: float = 30.0, max_attempts: int = 4
+        self,
+        api_key: str = "",
+        model: str = "",
+        timeout_seconds: float = 30.0,
+        max_attempts: int = 4,
+        vertex_project: str = "",
+        vertex_location: str = "",
     ):
         self._model = model  # 下划线开头是约定：表示"内部使用"，类似 Java 的 private
         # 超时必须设置：LLM 偶尔会卡很久，没有超时的话，一个慢请求会一直占着资源。
         # SDK 的超时单位是毫秒，所以乘以 1000。
-        self._client = genai.Client(api_key=api_key, http_options=build_http_options(timeout_seconds, max_attempts))
+        self._client = build_genai_client(
+            api_key=api_key, vertex_project=vertex_project, vertex_location=vertex_location,
+            timeout_seconds=timeout_seconds, max_attempts=max_attempts,
+        )
 
     async def generate(self, prompt: str, system: str | None = None) -> LLMResponse:
         # perf_counter 是测量耗时用的单调时钟，比 time.time() 更适合算时间差。

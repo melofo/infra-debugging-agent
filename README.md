@@ -53,6 +53,7 @@ Caveats: the scenarios are synthetic and come from one generator, 30 cases give 
 | `docs/evaluation-report.md` | dataset design, scoring, reference lines, results with the real model, cost and latency, retrieval evaluation, threats to validity |
 | `docs/demo-script.md` | a five-minute live demo with commands and what to say |
 | `docs/deployment.md` | containers (verified), production settings, a Cloud Run guide (not executed) |
+| `docs/gcp-deploy-checklist.md` | the step-by-step Google Cloud deployment (Cloud Run, Cloud SQL, Vertex AI) with a status per step |
 
 ## Run locally
 
@@ -73,6 +74,7 @@ GEMINI_MODEL=a-gemini-model-id-available-to-you
 # LOG_LEVEL=INFO
 # LLM_TIMEOUT_SECONDS=30
 # LLM_MAX_ATTEMPTS=4      # attempts on 429/503, with exponential backoff
+# LLM_PROVIDER=gemini-api # or vertex: Gemini on Google Cloud Vertex AI with a service account (no API key); also set GCP_PROJECT and GCP_LOCATION
 # AGENT_VARIANT=v2        # v2 = list_services tool + "beyond deploys" prompt; v1 = previous behavior
 # AGENT_MAX_STEPS=12
 # AUTH_REQUIRED=true      # set false only for purely local experiments (then no API key is needed)

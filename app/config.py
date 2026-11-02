@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     # 这样没有 key 的人也能跑 /health 和测试。
     gemini_api_key: str = ""
     gemini_model: str = ""
+    # 调用 Gemini 的通道：gemini-api = Google AI Studio 的 API key（默认）；vertex = Google Cloud 的 Vertex AI，
+    # 用服务账号身份（没有密钥）、费用记在 GCP 账单上。选 vertex 时还要配 GCP_PROJECT（和可选的 GCP_LOCATION）。
+    llm_provider: Literal["gemini-api", "vertex"] = "gemini-api"
+    gcp_project: str = ""
+    gcp_location: str = "us-central1"
     llm_timeout_seconds: float = 30.0
     llm_max_attempts: int = 4  # 遇到 429/503 时的最大尝试次数（含第一次）；设为 1 表示不重试
     # Agent 最多调用模型多少轮。硬上限，防止死循环烧钱。

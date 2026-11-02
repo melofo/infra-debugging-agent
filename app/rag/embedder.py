@@ -22,13 +22,13 @@ import re
 from collections import Counter
 from typing import Protocol
 
-from google import genai
+from google.auth.exceptions import DefaultCredentialsError
 from google.genai import types
 
 from app.config import Settings
 from app.llm.base import LLMError
-from app.llm.factory import LLMNotConfigured
-from app.llm.gemini import build_http_options
+from app.llm.factory import VERTEX_CREDENTIALS_HELP, LLMNotConfigured
+from app.llm.gemini import build_genai_client, build_http_options
 
 EMBEDDING_DIMENSIONS = 768
 
@@ -119,11 +119,16 @@ class GeminiEmbedder:
         max_attempts: int = 4,
         batch_size: int = 50,
         client=None,  # 测试时注入假客户端
+        vertex_project: str = "",
+        vertex_location: str = "",
     ):
         self._model = model
         self._dimensions = dimensions
         self._batch_size = batch_size
-        self._client = client or genai.Client(api_key=api_key, http_options=build_http_options(timeout_seconds, max_attempts))
+        self._client = client or build_genai_client(
+            api_key=api_key, vertex_project=vertex_project, vertex_location=vertex_location,
+            timeout_seconds=timeout_seconds, max_attempts=max_attempts,
+        )
 
     @property
     def id(self) -> str:
@@ -167,11 +172,21 @@ class GeminiEmbedder:
 def create_embedder(settings: Settings) -> Embedder:
     if settings.embedding_provider == "hash":
         return HashEmbedder()
-    if not settings.gemini_api_key:
+    vertex = settings.llm_provider == "vertex"
+    if vertex and not settings.gcp_project:
+        raise LLMNotConfigured("GCP_PROJECT must be set when LLM_PROVIDER=vertex (or set EMBEDDING_PROVIDER=hash)")
+    if not vertex and not settings.gemini_api_key:
         raise LLMNotConfigured("GEMINI_API_KEY must be set to use Gemini embeddings (or set EMBEDDING_PROVIDER=hash)")
-    return GeminiEmbedder(
-        api_key=settings.gemini_api_key,
-        model=settings.embedding_model,
-        timeout_seconds=settings.llm_timeout_seconds,
-        max_attempts=settings.llm_max_attempts,
-    )
+    try:
+        # 向量化器和对话客户端走同一种通道（API key 或 Vertex AI），模型名一样，所以向量的 id 也一样：
+        # 从 API key 切到 Vertex AI 不会让已有的知识库索引"不匹配"。
+        return GeminiEmbedder(
+            api_key=settings.gemini_api_key,
+            model=settings.embedding_model,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_attempts=settings.llm_max_attempts,
+            vertex_project=settings.gcp_project if vertex else "",
+            vertex_location=settings.gcp_location,
+        )
+    except DefaultCredentialsError as exc:
+        raise LLMNotConfigured(VERTEX_CREDENTIALS_HELP) from exc

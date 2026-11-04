@@ -56,7 +56,7 @@ async def open_tools(
         return
 
     if settings.tool_source == "mcp-memory":
-        target = build_mcp_server(build_investigation_tools(scenario, knowledge, service_discovery=discovery))
+        target = build_mcp_server(build_investigation_tools(scenario, knowledge, service_discovery=discovery), runbooks=scenario.runbooks)
     elif settings.tool_source == "mcp-http":
         # 远程服务端自己决定数据（场景、知识库）；这里只带上凭证。
         target = bearer_http_transport(settings.mcp_http_url, settings.mcp_api_key.get_secret_value())

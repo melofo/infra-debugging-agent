@@ -111,7 +111,7 @@ def main() -> None:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--sleep", type=float, default=0.0, help="seconds to wait between runs (rate limits)")
-    parser.add_argument("--agent", choices=["v1", "v2"], default="v1", help="agent configuration: v1 = current; v2 = experiment (list_services tool + 'beyond deploys' prompt)")
+    parser.add_argument("--agent", choices=["v1", "v2", "v3"], default="v1", help="agent configuration: v1 = original; v2 = default (list_services tool + 'beyond deploys' prompt); v3 = experiment (v2 content with XML tags and one example)")
     parser.add_argument("--max-steps", type=int, default=8)
     parser.add_argument("--temperature", type=float, help="sampling temperature for the real model (0 = most deterministic); omit to use the model default")
     parser.add_argument("--timeout", type=float, default=180.0)

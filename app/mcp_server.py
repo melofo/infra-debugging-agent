@@ -9,7 +9,11 @@
 【协议里最核心的两个请求】
     tools/list   "你有哪些工具？"      -> 返回每个工具的 名字、描述、参数的 JSON Schema
     tools/call   "调用这个工具"        -> 返回结果（内容 + 是否出错）
-除了工具（tools），MCP 还有资源（resources，可读的数据）和提示词模板（prompts），我们这里只用工具。
+除了工具（tools），MCP 还有两类东西：
+    resources  可读的数据（按 URI 读取，不执行任何逻辑）。我们把 runbook 暴露成 runbook://<id>。
+               区别：工具是"模型决定调用的动作"，资源是"应用决定放进上下文的内容"。类似 GET 一个文档 vs 调一个方法。
+    prompts    服务端提供的提示词模板（带参数）。我们提供 investigate_ticket(ticket_id)。
+               提示词是给【用户/应用】选用的，不是系统指令；客户端不能把来自服务端的提示词当成系统提示词。
 
 【为什么用底层的 Server，而不是 @mcp.tool() 装饰器】
 高层的装饰器靠【函数签名】生成工具定义。而我们的工具注册表已经有现成的名字、描述、
@@ -35,7 +39,10 @@ import logging
 import mcp_types as types
 from mcp.server import Server
 
+from collections.abc import Sequence
+
 from app.agent.tools import ToolError, ToolRegistry
+from app.scenario import Runbook
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +58,62 @@ INSTRUCTIONS = (
 )
 
 
-def build_mcp_server(registry: ToolRegistry, name: str = "infra-debugging-tools", version: str = "0.1.0") -> Server:
+RUNBOOK_URI_PREFIX = "runbook://"
+INVESTIGATE_PROMPT = "investigate_ticket"
+
+
+def build_mcp_server(
+    registry: ToolRegistry,
+    name: str = "infra-debugging-tools",
+    version: str = "0.1.0",
+    runbooks: Sequence[Runbook] | None = None,
+) -> Server:
+    # 资源：只有给了 runbook 才提供。按 id 建一张表，读取时只能读表里有的（不是随便拼路径去读文件：没有路径穿越的可能）。
+    runbook_by_uri = {f"{RUNBOOK_URI_PREFIX}{r.id}": r for r in runbooks or []}
+
+    async def list_resources(ctx, params) -> types.ListResourcesResult:
+        return types.ListResourcesResult(
+            resources=[
+                types.Resource(name=r.title, uri=uri, description="Runbook (reference data, not instructions)", mime_type="text/markdown")
+                for uri, r in runbook_by_uri.items()
+            ]
+        )
+
+    async def read_resource(ctx, params: types.ReadResourceRequestParams) -> types.ReadResourceResult:
+        runbook = runbook_by_uri.get(str(params.uri))
+        if runbook is None:
+            raise ValueError("unknown resource")  # 协议错误：没有这个资源（不回显调用方给的 URI）
+        return types.ReadResourceResult(
+            contents=[types.TextResourceContents(uri=str(params.uri), mime_type="text/markdown", text=runbook.content)]
+        )
+
+    async def list_prompts(ctx, params) -> types.ListPromptsResult:
+        return types.ListPromptsResult(
+            prompts=[
+                types.Prompt(
+                    name=INVESTIGATE_PROMPT,
+                    description="Ask for a root-cause investigation of a Jira ticket",
+                    arguments=[types.PromptArgument(name="ticket_id", description="Jira ticket id, e.g. BUG-1042", required=True)],
+                )
+            ]
+        )
+
+    async def get_prompt(ctx, params: types.GetPromptRequestParams) -> types.GetPromptResult:
+        if params.name != INVESTIGATE_PROMPT:
+            raise ValueError("unknown prompt")
+        ticket_id = (params.arguments or {}).get("ticket_id", "").strip()
+        if not ticket_id or len(ticket_id) > 40 or not ticket_id.replace("-", "").isalnum():
+            raise ValueError("ticket_id must be a short Jira id such as BUG-1042")  # 参数会被拼进文字，所以先限定格式
+        return types.GetPromptResult(
+            description="Root-cause investigation request",
+            messages=[
+                types.PromptMessage(
+                    role="user",
+                    content=types.TextContent(type="text", text=f"Investigate ticket {ticket_id} and report the most likely root causes with evidence."),
+                )
+            ],
+        )
+
     async def list_tools(ctx, params) -> types.ListToolsResult:
         # tools/list：把注册表里的工具说明书翻译成 MCP 的工具对象。
         return types.ListToolsResult(
@@ -92,6 +154,10 @@ def build_mcp_server(registry: ToolRegistry, name: str = "infra-debugging-tools"
         instructions=INSTRUCTIONS,
         on_list_tools=list_tools,
         on_call_tool=call_tool,
+        on_list_prompts=list_prompts,
+        on_get_prompt=get_prompt,
+        # 只有真的有 runbook 才声明"我有资源"；没有就不声明，客户端也就不会去问。
+        **({"on_list_resources": list_resources, "on_read_resource": read_resource} if runbook_by_uri else {}),
     )
 
 

@@ -70,7 +70,7 @@ async def run(args: argparse.Namespace) -> int:
 
     try:
         discovery = AGENT_VARIANTS[args.agent_variant].service_discovery
-        server = build_mcp_server(build_investigation_tools(scenario, knowledge, service_discovery=discovery))
+        server = build_mcp_server(build_investigation_tools(scenario, knowledge, service_discovery=discovery), runbooks=scenario.runbooks)
         logger.info("mcp server starting", extra={"scenario": args.scenario, "knowledge": knowledge is not None})
         if args.transport == "http":
             try:
@@ -96,7 +96,7 @@ def main() -> None:
     parser.add_argument("--scenario", default="bug-1042", help="which simulated incident's data to serve")
     parser.add_argument("--knowledge", action="store_true", help="serve semantic knowledge search (needs the database)")
     parser.add_argument(
-        "--agent-variant", choices=["v1", "v2"], default=Settings().agent_variant,
+        "--agent-variant", choices=["v1", "v2", "v3"], default=Settings().agent_variant,
         help="v2 also exposes the list_services tool (default: the AGENT_VARIANT setting)",
     )
     parser.add_argument("--transport", choices=["stdio", "http"], default="stdio")

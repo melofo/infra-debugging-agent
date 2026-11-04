@@ -100,7 +100,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run one investigation and print its trace.")
     parser.add_argument("--scenario", default="bug-1042")
     parser.add_argument("--llm", choices=["oracle", "gemini"], default="oracle")
-    parser.add_argument("--agent", choices=["v1", "v2"], default=Settings().agent_variant)
+    parser.add_argument("--agent", choices=["v1", "v2", "v3"], default=Settings().agent_variant)
     parser.add_argument("--max-steps", type=int, default=Settings().agent_max_steps)
     sys.exit(asyncio.run(run(parser.parse_args())))
 

@@ -54,7 +54,7 @@ def test_the_variant_definitions_are_shared_between_production_and_the_evaluatio
 
 def test_an_unknown_variant_is_rejected_at_startup():
     with pytest.raises(Exception):
-        Settings(_env_file=None, agent_variant="v3")
+        Settings(_env_file=None, agent_variant="v9")
 
 
 # ============================================================ 工具来源

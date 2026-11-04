@@ -8,7 +8,7 @@
 """
 
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 
 from google import genai
 from google.genai import types
@@ -70,11 +70,16 @@ class GeminiClient:
         vertex_project: str = "",
         vertex_location: str = "",
         temperature: float | None = None,
+        thinking_budget: int | None = None,
     ):
         self._model = model  # 下划线开头是约定：表示"内部使用"，类似 Java 的 private
         # temperature：模型每生成一个 token 时"怎么从候选里选"的旋钮。0 = 几乎总选概率最高的（稳定、可复现），
         # 越高越随机。None = 不传，用模型自己的默认值（和加这个参数之前的行为完全一样）。
         self._temperature = temperature
+        # 扩展思考（extended thinking）：让模型在回答前先"想一会儿"。thinking_budget = 允许它用来思考的 token 数上限
+        # （0 = 关闭，-1 = 让模型自己决定，None = 不传，用模型默认）。思考也要计费、也会变慢，所以是个要权衡的开关。
+        # 思考的内容不会混进我们的回答：_to_llm_response 已经跳过了 part.thought。
+        self._thinking = types.ThinkingConfig(thinking_budget=thinking_budget) if thinking_budget is not None else None
         # 超时必须设置：LLM 偶尔会卡很久，没有超时的话，一个慢请求会一直占着资源。
         # SDK 的超时单位是毫秒，所以乘以 1000。
         self._client = build_genai_client(
@@ -91,12 +96,30 @@ class GeminiClient:
             response = await self._client.aio.models.generate_content(
                 model=self._model,
                 contents=prompt,
-                config=types.GenerateContentConfig(system_instruction=system, temperature=self._temperature),
+                config=types.GenerateContentConfig(system_instruction=system, temperature=self._temperature, thinking_config=self._thinking),
             )
         except Exception as exc:  # SDK 可能抛多种异常，这里统一转成我们自己的 LLMError
             # `from exc` 保留原始异常链，排查问题时能看到根本原因（类似 Java 的 cause）。
             raise LLMError(f"Gemini request failed: {exc}") from exc
         return _to_llm_response(response, start)
+
+    async def generate_stream(self, prompt: str, system: str | None = None) -> AsyncIterator[str]:
+        """逐段返回模型的文字（边生成边给，不用等全部写完）。
+
+        用在"人在等着看"的场景（聊天界面）：第一个字出来得快，体感更快，总耗时不变。
+        我们的 agent 循环不用它：agent 需要拿到完整的一轮输出（文字 + 工具调用）才能决定下一步。
+        目前只有 Gemini 实现，没有放进 LLMClient 接口；要用在界面上时再决定是否提升为接口。
+        """
+        config = types.GenerateContentConfig(system_instruction=system, temperature=self._temperature, thinking_config=self._thinking)
+        try:
+            stream = await self._client.aio.models.generate_content_stream(model=self._model, contents=prompt, config=config)
+            async for chunk in stream:
+                parts = (chunk.candidates[0].content.parts if chunk.candidates and chunk.candidates[0].content else None) or []
+                text = "".join(p.text for p in parts if p.text and not p.thought)  # 跳过思考内容
+                if text:
+                    yield text
+        except Exception as exc:
+            raise LLMError(f"Gemini stream failed: {exc}") from exc
 
     # ---------------------------------------------------------------
     # 路径 A：手写 agent loop 用的单次请求
@@ -108,6 +131,7 @@ class GeminiClient:
         config = types.GenerateContentConfig(
             system_instruction=system,
             temperature=self._temperature,
+            thinking_config=self._thinking,
             # 只传"工具声明"（名字+描述+参数结构），没有可执行函数。
             # 这样 SDK 的 function_map 为空，即使 AFC 开着也会在第一次请求后 break（见 models.py）。
             tools=[
@@ -156,6 +180,7 @@ class GeminiClient:
         config = types.GenerateContentConfig(
             system_instruction=system,
             temperature=self._temperature,
+            thinking_config=self._thinking,
             tools=functions,  # 直接传可调用的函数，SDK 的 function_map 非空 → 触发自动循环
             automatic_function_calling=types.AutomaticFunctionCallingConfig(
                 maximum_remote_calls=max_remote_calls

@@ -61,6 +61,27 @@ different service than the one that is failing, so call list_services to see wha
 logs of the services that look related. Do not stop at the first error message: ask what changed just \
 before it started, and prefer the change over its symptom as the root cause."""
 
+# 第三版提示词（实验，不是默认）：内容和 v2 相同，只改【写法】——两个提示词工程技巧：
+#   XML 标签：用 <instructions> <method> <example> 把几段话分开，模型更容易分清"规则"和"示例"，也方便以后单独替换某一段；
+#   示例（few-shot）：给一个通用的"好的调查路径"。示例刻意不提评估里的任何具体场景或故障类型（有测试守着）。
+# 它是否真的更好，要看对照实验（--agent v3），不是看这里的改动；在测出来之前默认仍是 v2。
+SYSTEM_PROMPT_V3 = f"""<instructions>
+{SYSTEM_PROMPT}
+</instructions>
+
+<method>
+{SYSTEM_PROMPT_V2[len(SYSTEM_PROMPT):].strip()}
+</method>
+
+<example>
+Ticket: "Orders started failing at 09:00." A good path: read the ticket; look at the deploys and logs of \
+the failing service; if nothing there explains the start time, call list_services, search the logs of \
+the services that look related, and look for a change logged just before 09:00. A good hypothesis \
+names that change as the cause (not the error it produced), cites the exact log line copied from the \
+tool result, and lists one concrete next step.
+</example>"""
+
+
 @dataclass(frozen=True)
 class AgentVariant:
     """agent 的配置：用哪段系统提示词、有没有服务目录工具。评估（对照实验）和线上用的是同一份定义。"""
@@ -72,6 +93,7 @@ class AgentVariant:
 AGENT_VARIANTS = {
     "v1": AgentVariant(SYSTEM_PROMPT, service_discovery=False),
     "v2": AgentVariant(SYSTEM_PROMPT_V2, service_discovery=True),
+    "v3": AgentVariant(SYSTEM_PROMPT_V3, service_discovery=True),  # 实验：v2 的内容 + XML 标签 + 一个示例
 }
 
 SUBMIT_TOOL_NAME = "submit_rca_report"

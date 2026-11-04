@@ -47,12 +47,14 @@ class Settings(BaseSettings):
     gcp_location: str = "us-central1"
     # 采样温度（每个 token 怎么选）：空 = 用模型默认值；0 = 最稳定、可复现。范围 0 到 2。
     llm_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    # 扩展思考的 token 预算：空 = 用模型默认；0 = 关闭；-1 = 模型自己决定；正数 = 上限。思考要额外计费。
+    llm_thinking_budget: int | None = Field(default=None, ge=-1, le=32768)
     llm_timeout_seconds: float = 30.0
     llm_max_attempts: int = 4  # 遇到 429/503 时的最大尝试次数（含第一次）；设为 1 表示不重试
     # Agent 最多调用模型多少轮。硬上限，防止死循环烧钱。
     agent_max_steps: int = 12  # 评估里 v2 用 12：多查几个服务需要更多的步数（v1 的 8 步在两个案例里用完了）
     # agent 的配置：v2 = 服务目录工具 + "不要只看发布"的提示词（默认，评估证明更好）；v1 = 原来的配置。
-    agent_variant: Literal["v1", "v2"] = "v2"
+    agent_variant: Literal["v1", "v2", "v3"] = "v2"
     # 数据库连接串。格式：postgresql://用户:密码@主机:端口/库名
     # 默认值对应 docker-compose.yml 里的本地开发数据库（只绑定在本机回环地址，没有真实数据）。
     # 部署到云上时通过环境变量 DATABASE_URL 覆盖，密码来自 Secret Manager，绝不写进代码。

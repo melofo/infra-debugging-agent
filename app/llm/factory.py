@@ -33,6 +33,7 @@ def create_llm_client(settings: Settings) -> LLMClient:
                 vertex_project=settings.gcp_project,
                 vertex_location=settings.gcp_location,
                 temperature=settings.llm_temperature,
+                thinking_budget=settings.llm_thinking_budget,
             )
         except DefaultCredentialsError as exc:
             # 没有找到凭证：给一条能照着做的提示，而不是 SDK 里一大段看不懂的异常。
@@ -45,4 +46,5 @@ def create_llm_client(settings: Settings) -> LLMClient:
         timeout_seconds=settings.llm_timeout_seconds,
         max_attempts=settings.llm_max_attempts,
         temperature=settings.llm_temperature,
+        thinking_budget=settings.llm_thinking_budget,
     )

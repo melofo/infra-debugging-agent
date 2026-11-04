@@ -38,6 +38,7 @@ from app.agent.common import AgentError
 from app.config import ensure_safe_mcp_endpoint
 from app.agent.tools import ToolError
 from app.llm.base import ToolSpec
+from app.mcp_server import INVESTIGATE_PROMPT, RUNBOOK_URI_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,8 @@ INVESTIGATION_TOOLS = frozenset(
 
 MAX_LIST_PAGES = 5
 MAX_ERROR_CHARS = 500
+MAX_RESOURCES = 50  # 最多接受多少个资源地址：不可信的服务端可以列出无限多个
+MAX_PROMPT_CHARS = 2000
 
 
 class ToolSourceError(AgentError):
@@ -78,6 +81,48 @@ class McpToolRegistry:
 
     def specs(self) -> list[ToolSpec]:
         return list(self._specs)
+
+    # ---- 资源和提示词（可选能力）。服务端是【不可信】的：只接受 runbook:// 这一种地址，数量、大小、耗时都有上限。
+    async def list_runbooks(self) -> list[str]:
+        """服务端提供的 runbook 地址列表（只保留 runbook:// 开头的，最多 MAX_RESOURCES 个）。"""
+        try:
+            async with asyncio.timeout(self._call_timeout):
+                listing = await self._client.list_resources()
+        except Exception:  # 超时、协议错误、服务端没有资源能力……一律当作"没有可读的资源"，不影响调查
+            logger.warning("could not list MCP resources", exc_info=True)
+            return []
+        uris = [str(r.uri) for r in listing.resources if str(r.uri).startswith(RUNBOOK_URI_PREFIX)]
+        return uris[:MAX_RESOURCES]
+
+    async def read_runbook(self, uri: str) -> str:
+        """读一份 runbook 的文字。返回的是【数据】：调用方只能当参考资料，不能当指令。"""
+        if not uri.startswith(RUNBOOK_URI_PREFIX):
+            raise ToolError("only runbook:// resources can be read")  # 客户端自己强制：不会去读服务端指的任意地址
+        try:
+            async with asyncio.timeout(self._call_timeout):
+                result = await self._client.read_resource(uri)
+        except TimeoutError:
+            raise ToolError("reading the runbook timed out") from None
+        except Exception:
+            logger.warning("mcp resource read failed", exc_info=True)
+            raise ToolError("the runbook could not be read") from None
+        text = "".join(c.text for c in result.contents if isinstance(c, types.TextResourceContents))
+        if len(text) > self._max_result_chars:
+            raise ToolError("the runbook is too large")
+        return text
+
+    async def investigation_prompt(self, ticket_id: str) -> str:
+        """服务端的 investigate_ticket 提示词模板，取出文字。它是给【用户】选用的，不能当系统提示词用。"""
+        try:
+            async with asyncio.timeout(self._call_timeout):
+                prompt = await self._client.get_prompt(INVESTIGATE_PROMPT, {"ticket_id": ticket_id})
+        except Exception:
+            logger.warning("mcp prompt failed", exc_info=True)
+            raise ToolError("the prompt could not be fetched") from None
+        text = "".join(m.content.text for m in prompt.messages if isinstance(m.content, types.TextContent))
+        if not text or len(text) > MAX_PROMPT_CHARS:
+            raise ToolError("the prompt is empty or too large")
+        return text
 
     async def execute(self, name: str, raw_args: dict) -> Any:
         if name not in self._names:

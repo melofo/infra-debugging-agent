@@ -105,7 +105,21 @@ Per investigation, averages over runs that produced a report.
 
 v2 costs about **+21% input tokens and +8% model calls** on the development set for roughly the same latency. Input tokens dominate (about 30-40x the output), because every model call re-sends the whole history, so cost per investigation is approximately `input_tokens x input_price + output_tokens x output_price`. At v2's averages, **1,000 investigations are about 18.7 million input and 0.49 million output tokens**; multiply by your model's current prices (this project does not hard-code prices; pass `--price-in` and `--price-out` to the evaluation script to get an estimate). In an interview the sharper point is that the cost is controlled by design: a step limit per turn, a turn limit per session, a size cap on tool results, and bounded grounding retries.
 
-### 5.5 Retrieval (separate evaluation of the knowledge search)
+### 5.5 Sampling temperature
+
+Question: does lowering the sampling temperature to 0 (the model picks the most likely token at every step, so runs should vary less) improve v2? Google's guidance for Gemini 3 models is to leave temperature at the default, because lower values may degrade reasoning or cause loops, so this was checked rather than assumed. Same 6 held-out scenarios, 3 runs each, v2, 12 steps, only the temperature changed (`--temperature 0`, recorded in the results file).
+
+| | Default temperature | Temperature 0 |
+|---|---|---|
+| Top-1 | 18/18 | 18/18 |
+| Errors, grounding rejections | 0, 0 | 0, 0 |
+| Calibration gap | -0.12 | -0.11 |
+| Model calls, input tokens | 8.22, 21,267 | 8.33, 21,363 |
+| Latency p50 / p95 | 8.0 s / 32.4 s | 16.5 s / 75.7 s |
+
+Result: **no measurable effect on accuracy** (paired sign test on 6 scenarios: no case changed, p = 1.0). The test cannot show an improvement here, because the default is already at the ceiling (18/18), so the only thing it can establish is "no worse". Latency was higher at temperature 0 in this one sitting; with 18 runs and a rate-limited free tier (retries wait 8 s or more) this is not evidence that temperature 0 is slower, and it was not investigated further. Decision: **keep the default** (`LLM_TEMPERATURE` unset); the setting stays available and is recorded per run. A harder set, where the default is not already perfect, would be needed to see whether lower temperature reduces run-to-run variation.
+
+### 5.6 Retrieval (separate evaluation of the knowledge search)
 
 35 labeled queries, document-level hit@3 and mean reciprocal rank (MRR):
 
@@ -143,6 +157,7 @@ python scripts/eval_agent.py --llm oracle                      # reference lines
 python scripts/eval_agent.py --llm latest_deploy
 python scripts/eval_agent.py --llm gemini --agent v2 --max-steps 12 --sleep 15 --out eval_results/v2-dev.jsonl
 python scripts/eval_agent.py --llm gemini --split holdout --agent v2 --max-steps 12 --repeat 3 --out eval_results/v2-holdout.jsonl
+python scripts/eval_agent.py --llm gemini --split holdout --agent v2 --max-steps 12 --repeat 3 --temperature 0 --out eval_results/v2-holdout-temp0.jsonl
 python scripts/compare_evals.py eval_results/run2.jsonl eval_results/v2-dev.jsonl    # paired comparison, sign test
 python scripts/eval_agent.py --rescore eval_results/run2.jsonl                       # re-score saved results with the current rule
 python scripts/eval_retrieval.py                                                     # retrieval evaluation

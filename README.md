@@ -75,7 +75,9 @@ GEMINI_MODEL=a-gemini-model-id-available-to-you
 # LLM_TIMEOUT_SECONDS=30
 # LLM_MAX_ATTEMPTS=4      # attempts on 429/503, with exponential backoff
 # LLM_PROVIDER=gemini-api # or vertex: Gemini on Google Cloud Vertex AI with a service account (no API key); also set GCP_PROJECT and GCP_LOCATION
-# AGENT_VARIANT=v2        # v2 = list_services tool + "beyond deploys" prompt; v1 = previous behavior
+# AGENT_VARIANT=v2        # v2 = list_services tool + "beyond deploys" prompt; v1 = previous behavior; v3 = experiment (v2 with XML tags and one example, not evaluated)
+# LLM_TEMPERATURE=         # unset = model default (temperature 0 made no difference on the held-out set, see docs/evaluation-report.md)
+# LLM_THINKING_BUDGET=     # unset = model default; 0 = off; -1 = model decides; or a token limit
 # AGENT_MAX_STEPS=12
 # AUTH_REQUIRED=true      # set false only for purely local experiments (then no API key is needed)
 ```
@@ -248,7 +250,7 @@ Posting uses a simulated Jira (a `jira_outbox` table with an idempotency key); a
 
 ## MCP server
 
-The investigation tools (ticket, logs, deployments, runbook/knowledge search) are also exposed as a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, so any MCP host can use them: `scripts/mcp_server.py` (`--knowledge` adds semantic search). All tools are declared read-only and share their definitions, argument validation and limits with the agent's own tool registry; the agent's `submit_rca_report` action is deliberately not exposed. Connect it to Claude Code with `claude mcp add infra-debugging -- <project>/.venv/bin/python <project>/scripts/mcp_server.py`.
+The investigation tools (ticket, logs, deployments, runbook/knowledge search) are also exposed as a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, so any MCP host can use them: `scripts/mcp_server.py` (`--knowledge` adds semantic search). All tools are declared read-only and share their definitions, argument validation and limits with the agent's own tool registry; the agent's `submit_rca_report` action is deliberately not exposed. Connect it to Claude Code with `claude mcp add infra-debugging -- <project>/.venv/bin/python <project>/scripts/mcp_server.py`. The server also offers the scenario's runbooks as `runbook://<id>` **resources** (readable by listed id only) and an `investigate_ticket` **prompt** template; the client accepts only that URI scheme and caps count, size and time, and never uses a server-provided prompt as a system prompt.
 
 The agent can also consume its tools **through** MCP (`TOOL_SOURCE=direct|mcp-memory|mcp-stdio|mcp-http`, a server-side setting: a request cannot choose it). The MCP client treats the server as untrusted: tool allowlist, read-only requirement, truncated descriptions, schema/result/time limits. `scripts/compare_tool_transports.py` measures what each layer costs.
 

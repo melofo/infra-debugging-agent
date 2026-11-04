@@ -239,6 +239,7 @@ def _to_llm_response(
         text=text,
         input_tokens=(usage.prompt_token_count or 0) if usage else 0,
         output_tokens=(usage.candidates_token_count or 0) if usage else 0,
+        cached_input_tokens=(usage.cached_content_token_count or 0) if usage else 0,
         latency_ms=int((time.perf_counter() - start) * 1000),
         tool_calls=tool_calls,
         raw=candidate.content if candidate else None,

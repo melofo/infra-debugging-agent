@@ -51,6 +51,7 @@ class CaseResult:
     schema_rejections: int = 0  # 报告因为格式不合格（比如假设没有证据）被打回的次数
     input_tokens: int = 0
     output_tokens: int = 0
+    cached_input_tokens: int | None = None  # None = 这个结果文件生成时还没记录这一项（旧文件），不等于 0
     latency_ms: int = 0
     error: str = ""
     tools_used: list[str] = field(default_factory=list)
@@ -142,6 +143,7 @@ async def run_case(
         result.top_cause = report.hypotheses[0].root_cause[:300]
         result.tool_calls = sum(1 for s in run.steps if s.tool != SUBMIT_TOOL_NAME)
         result.llm_calls, result.input_tokens, result.output_tokens = run.llm_calls, run.input_tokens, run.output_tokens
+        result.cached_input_tokens = run.cached_input_tokens
         result.grounding_rejections, result.schema_rejections = count_rejections(run.steps)
         result.tools_used = sorted({s.tool for s in run.steps if s.tool != SUBMIT_TOOL_NAME})
         result.report = report.model_dump(mode="json")
@@ -182,6 +184,12 @@ def _group(results: list[CaseResult], key) -> dict:
     }
 
 
+def _cached_share(results: list[CaseResult]) -> float | None:
+    recorded = [r for r in results if r.cached_input_tokens is not None]
+    total = sum(r.input_tokens for r in recorded)
+    return round(sum(r.cached_input_tokens for r in recorded) / total, 3) if recorded and total else None
+
+
 def summarize(results: list[CaseResult], price_in_per_million: float = 0.0, price_out_per_million: float = 0.0) -> dict:
     ok = [r for r in results if r.status == "ok"]
     latencies = [r.latency_ms for r in results]
@@ -219,6 +227,8 @@ def summarize(results: list[CaseResult], price_in_per_million: float = 0.0, pric
             "avg_llm_calls": round(sum(r.llm_calls for r in ok) / len(ok), 2) if ok else None,
             "avg_input_tokens": round(sum(r.input_tokens for r in ok) / len(ok)) if ok else None,
             "avg_output_tokens": round(sum(r.output_tokens for r in ok) / len(ok)) if ok else None,
+            # 输入 token 里命中提示词缓存的比例：只统计记录过这一项的结果；旧结果文件没有，就是 None（不是 0%）。
+            "cached_input_share": _cached_share(ok),
             "latency_ms_p50": percentile(latencies, 0.5),
             "latency_ms_p95": percentile(latencies, 0.95),
             "estimated_cost_usd": round(cost, 4) if (price_in_per_million or price_out_per_million) else None,

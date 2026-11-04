@@ -130,7 +130,7 @@ class InvestigationAgent:
         tools = self._registry.specs() + [submit_spec()]
         messages.append(Message(role="user", text=user_text))
         steps: list[StepRecord] = []
-        llm_calls = input_tokens = output_tokens = 0
+        llm_calls = input_tokens = output_tokens = cached_input_tokens = 0
 
         async def add_step(record: StepRecord) -> None:
             steps.append(record)
@@ -145,6 +145,7 @@ class InvestigationAgent:
                 llm_calls=llm_calls,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cached_input_tokens=cached_input_tokens,
                 latency_ms=int((time.perf_counter() - start) * 1000),
             )
 
@@ -176,6 +177,7 @@ class InvestigationAgent:
             llm_calls += 1
             input_tokens += response.input_tokens
             output_tokens += response.output_tokens
+            cached_input_tokens += response.cached_input_tokens
 
             # 把模型这一轮的输出追加进历史，下一圈它才"记得"自己说过什么。
             messages.append(

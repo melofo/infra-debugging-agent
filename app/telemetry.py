@@ -107,6 +107,7 @@ def record_llm_call(current: Span, response: Any, seconds: float) -> None:
         **{
             "llm.input_tokens": response.input_tokens,
             "llm.output_tokens": response.output_tokens,
+            "llm.cached_input_tokens": getattr(response, "cached_input_tokens", 0),
             "llm.tool_calls": len(response.tool_calls),
         },
     )

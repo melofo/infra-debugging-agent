@@ -72,6 +72,9 @@ class LLMResponse:
     # 模型这一轮想调用的工具。空元组表示它直接给出了文字回答。
     tool_calls: tuple[ToolCall, ...] = ()
     raw: Any = field(default=None, compare=False)
+    # 其中有多少输入 token 命中了厂商的提示词缓存（Gemini 会自动缓存重复的前缀，命中的部分更便宜、更快）。
+    # 每圈都重发完整历史，所以前缀大部分是重复的。0 = 没命中或厂商没报告。
+    cached_input_tokens: int = 0
 
 
 # Protocol 是 Python 的"结构化接口"：不需要写 implements。

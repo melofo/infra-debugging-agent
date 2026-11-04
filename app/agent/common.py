@@ -140,6 +140,7 @@ class InvestigationResult:
     input_tokens: int = 0
     output_tokens: int = 0
     latency_ms: int = 0
+    cached_input_tokens: int = 0  # input_tokens 里命中提示词缓存的部分
 
 
 def preview(value: object, limit: int = 300) -> str:

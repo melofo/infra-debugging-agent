@@ -137,6 +137,8 @@ def format_report(summary: dict, title: str) -> str:
         f"cost per case: {c['avg_llm_calls']} model calls, {c['avg_tool_calls']} tool calls, "
         f"{c['avg_input_tokens']} in / {c['avg_output_tokens']} out tokens; latency p50 {c['latency_ms_p50']}ms p95 {c['latency_ms_p95']}ms"
     )
+    if c.get("cached_input_share") is not None:
+        lines.append(f"prompt cache: {c['cached_input_share']:.1%} of input tokens were served from the provider's cache")
     if c["estimated_cost_usd"] is not None:
         lines.append(f"estimated cost for this run: ${c['estimated_cost_usd']}")
     return "\n".join(lines)

@@ -108,6 +108,18 @@ Schema creation is idempotent and guarded by a Postgres advisory lock, because s
 | Evaluation with baselines, a held-out set and a paired sign test | accuracy percentage only | a number means nothing without a floor and a ceiling; 30 noisy runs need paired comparison | synthetic scenarios, keyword scorer |
 | OpenTelemetry with sanitized attributes | plain logs | one model for traces, metrics and logs; vendor neutral | an extra dependency (a no-op when unconfigured) |
 
+## 5a. Workflow patterns around the agent (`app/agent/workflows.py`)
+
+The production path is still one agent. On top of it sit three small, optional patterns where the **code** fixes the steps and the model works inside each step (as opposed to the agent loop, where the model decides the next step). A "specialist" is the same `InvestigationAgent` with the same tools and rules plus one line saying what to check first, so evidence grounding, read-only tools and step limits are unchanged.
+
+| Pattern | What it does | Properties that are tested |
+|---|---|---|
+| Routing | One cheap model call classifies the ticket (`deploy`, `config`, `infrastructure`, `general`); only the chosen specialist runs | any answer outside the list falls back to `general`; a failing classifier does not fail the investigation |
+| Parallelization | All specialists run at the same time; hypotheses are merged, sorted by confidence, top 5 kept | really concurrent; one failed specialist does not sink the others; an unexpected exception is not swallowed |
+| Chaining | route, then one specialist, then a gate: if the top confidence is below 0.6, escalate to the parallel search | cheap path stops when confident; token and call accounting covers every step |
+
+Limits, stated plainly: the gate uses the model's self-reported confidence, which was badly calibrated in v1 (+0.85) and acceptable in v2 (-0.12), so it is an escalation signal and not proof of correctness. The patterns were verified with a scripted fake model only; they have **not** been evaluated on the real model, so there is no claim that they beat the single agent. Parallel specialists cost roughly three times one investigation. The focus lines are deliberately generic so they do not name the held-out incident types (a test checks this). A framework such as ADK or LangGraph would replace this orchestration code, not the agent loop or the grounding.
+
 ## 6. Failure modes and how they are handled
 
 | Failure | Behavior |

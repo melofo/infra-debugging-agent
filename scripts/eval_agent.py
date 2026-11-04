@@ -68,7 +68,7 @@ async def run(args: argparse.Namespace) -> int:
 
     if args.llm == "gemini":
         try:
-            client = create_llm_client(Settings())
+            client = create_llm_client(Settings(llm_temperature=args.temperature))
         except LLMNotConfigured as exc:
             print(f"Cannot run the real model: {exc}. Run scripts/check_env.py to see what is missing.")
             return 2
@@ -79,7 +79,7 @@ async def run(args: argparse.Namespace) -> int:
 
     out = Path(args.out or f"eval_results/agent-{args.llm}-{time.strftime('%Y%m%d-%H%M%S')}.jsonl")
     total = len(cases) * args.repeat
-    print(f"running {total} runs ({len(cases)} cases x {args.repeat}) with {args.llm}, agent {args.agent}, max steps {args.max_steps}; results are appended to {out}")
+    print(f"running {total} runs ({len(cases)} cases x {args.repeat}) with {args.llm}, agent {args.agent}, max steps {args.max_steps}, temperature {args.temperature if args.temperature is not None else 'default'}; results are appended to {out}")
 
     counter = {"n": 0}
 
@@ -90,7 +90,7 @@ async def run(args: argparse.Namespace) -> int:
 
     results = await run_all(
         cases, factory, out, repeat=args.repeat, sleep_seconds=args.sleep,
-        max_steps=args.max_steps, timeout_seconds=args.timeout, variant=args.agent, on_result=progress,
+        max_steps=args.max_steps, timeout_seconds=args.timeout, variant=args.agent, temperature=args.temperature, on_result=progress,
     )
     summary = summarize(results, price_in_per_million=args.price_in, price_out_per_million=args.price_out)
     print()
@@ -113,6 +113,7 @@ def main() -> None:
     parser.add_argument("--sleep", type=float, default=0.0, help="seconds to wait between runs (rate limits)")
     parser.add_argument("--agent", choices=["v1", "v2"], default="v1", help="agent configuration: v1 = current; v2 = experiment (list_services tool + 'beyond deploys' prompt)")
     parser.add_argument("--max-steps", type=int, default=8)
+    parser.add_argument("--temperature", type=float, help="sampling temperature for the real model (0 = most deterministic); omit to use the model default")
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--out", help="JSONL file for per-case results (also used to resume)")
     parser.add_argument("--rescore", metavar="FILE", help="re-score a saved results file with the current scoring rule (free, no model calls)")

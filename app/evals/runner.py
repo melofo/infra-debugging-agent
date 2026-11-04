@@ -83,6 +83,7 @@ async def run_all(
     max_steps: int = 8,
     timeout_seconds: float = 180.0,
     variant: str = "v1",
+    temperature: float | None = None,
     on_result: Callable[[CaseResult], Awaitable[None] | None] | None = None,
 ) -> list[CaseResult]:
     """返回【这次文件里所有的结果】（包括之前已经完成的）。"""
@@ -92,7 +93,7 @@ async def run_all(
         for index in range(repeat):
             if (entry["scenario"], index) in done:
                 continue
-            result = await run_case(entry, llm_factory(entry), repeat=index, max_steps=max_steps, timeout_seconds=timeout_seconds, variant=variant)
+            result = await run_case(entry, llm_factory(entry), repeat=index, max_steps=max_steps, timeout_seconds=timeout_seconds, variant=variant, temperature=temperature)
             with out_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(result_to_dict(result), ensure_ascii=False) + "\n")  # 做完一个存一个
             if on_result is not None:

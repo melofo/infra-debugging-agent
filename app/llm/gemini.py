@@ -69,8 +69,12 @@ class GeminiClient:
         max_attempts: int = 4,
         vertex_project: str = "",
         vertex_location: str = "",
+        temperature: float | None = None,
     ):
         self._model = model  # 下划线开头是约定：表示"内部使用"，类似 Java 的 private
+        # temperature：模型每生成一个 token 时"怎么从候选里选"的旋钮。0 = 几乎总选概率最高的（稳定、可复现），
+        # 越高越随机。None = 不传，用模型自己的默认值（和加这个参数之前的行为完全一样）。
+        self._temperature = temperature
         # 超时必须设置：LLM 偶尔会卡很久，没有超时的话，一个慢请求会一直占着资源。
         # SDK 的超时单位是毫秒，所以乘以 1000。
         self._client = build_genai_client(
@@ -87,7 +91,7 @@ class GeminiClient:
             response = await self._client.aio.models.generate_content(
                 model=self._model,
                 contents=prompt,
-                config=types.GenerateContentConfig(system_instruction=system),
+                config=types.GenerateContentConfig(system_instruction=system, temperature=self._temperature),
             )
         except Exception as exc:  # SDK 可能抛多种异常，这里统一转成我们自己的 LLMError
             # `from exc` 保留原始异常链，排查问题时能看到根本原因（类似 Java 的 cause）。
@@ -103,6 +107,7 @@ class GeminiClient:
         start = time.perf_counter()
         config = types.GenerateContentConfig(
             system_instruction=system,
+            temperature=self._temperature,
             # 只传"工具声明"（名字+描述+参数结构），没有可执行函数。
             # 这样 SDK 的 function_map 为空，即使 AFC 开着也会在第一次请求后 break（见 models.py）。
             tools=[
@@ -150,6 +155,7 @@ class GeminiClient:
         start = time.perf_counter()
         config = types.GenerateContentConfig(
             system_instruction=system,
+            temperature=self._temperature,
             tools=functions,  # 直接传可调用的函数，SDK 的 function_map 非空 → 触发自动循环
             automatic_function_calling=types.AutomaticFunctionCallingConfig(
                 maximum_remote_calls=max_remote_calls

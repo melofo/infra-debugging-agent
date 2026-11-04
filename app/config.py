@@ -11,7 +11,7 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     llm_provider: Literal["gemini-api", "vertex"] = "gemini-api"
     gcp_project: str = ""
     gcp_location: str = "us-central1"
+    # 采样温度（每个 token 怎么选）：空 = 用模型默认值；0 = 最稳定、可复现。范围 0 到 2。
+    llm_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     llm_timeout_seconds: float = 30.0
     llm_max_attempts: int = 4  # 遇到 429/503 时的最大尝试次数（含第一次）；设为 1 表示不重试
     # Agent 最多调用模型多少轮。硬上限，防止死循环烧钱。

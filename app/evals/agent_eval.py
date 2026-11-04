@@ -37,6 +37,7 @@ class CaseResult:
     repeat: int = 0
     variant: str = "v1"  # 用的是哪个 agent 配置、多大的步数上限：结果文件要能说明"这个数字是在什么条件下测的"
     max_steps: int = 8
+    temperature: float | None = None  # 采样温度；None = 模型默认值（旧结果文件没有这个字段，读出来就是 None）
     status: str = "ok"  # ok | agent_error | llm_error | timeout
     correct_rank: int | None = None
     top1: bool = False
@@ -87,7 +88,14 @@ def count_rejections(steps) -> tuple[int, int]:
 
 
 async def run_case(
-    entry: dict, llm: LLMClient, *, repeat: int = 0, max_steps: int = 8, timeout_seconds: float = 180.0, variant: str = "v1"
+    entry: dict,
+    llm: LLMClient,
+    *,
+    repeat: int = 0,
+    max_steps: int = 8,
+    timeout_seconds: float = 180.0,
+    variant: str = "v1",
+    temperature: float | None = None,
 ) -> CaseResult:
     """跑一个场景。任何失败都变成一条"答错"的记录，而不是让整批评估中断，也不是从统计里消失。"""
     scenario = load_scenario(entry["scenario"])
@@ -99,6 +107,7 @@ async def run_case(
         repeat=repeat,
         variant=variant,
         max_steps=max_steps,
+        temperature=temperature,
     )
     config = AGENT_VARIANTS[variant]
     # 评估用场景自带的关键词版 runbook 检索（不依赖数据库和知识库）：每次运行的条件完全一样，结果可复现。

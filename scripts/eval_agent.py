@@ -66,7 +66,7 @@ async def run(args: argparse.Namespace) -> int:
         print("no cases match those filters")
         return 2
 
-    if args.llm == "gemini":
+    if args.llm in ("gemini", "real"):  # real = 真实模型，具体是哪个由 LLM_PROVIDER 决定（gemini 是旧名字，保留兼容）
         try:
             client = create_llm_client(Settings(llm_temperature=args.temperature))
         except LLMNotConfigured as exc:
@@ -103,7 +103,7 @@ async def run(args: argparse.Namespace) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate the agent on the incident scenarios.")
-    parser.add_argument("--llm", choices=["gemini", *BASELINES], default="oracle")
+    parser.add_argument("--llm", choices=["gemini", "real", *BASELINES], default="oracle")
     parser.add_argument("--scenario", action="append", help="only this scenario (repeatable), e.g. bug-2003")
     parser.add_argument("--split", choices=["dev", "holdout", "all"], default="dev", help="dev (default): the 30 scenarios used while developing; holdout: 6 unseen incident types, for checking an improvement generalises")
     parser.add_argument("--category")

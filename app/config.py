@@ -42,14 +42,21 @@ class Settings(BaseSettings):
     gemini_model: str = ""
     # 调用 Gemini 的通道：gemini-api = Google AI Studio 的 API key（默认）；vertex = Google Cloud 的 Vertex AI，
     # 用服务账号身份（没有密钥）、费用记在 GCP 账单上。选 vertex 时还要配 GCP_PROJECT（和可选的 GCP_LOCATION）。
-    llm_provider: Literal["gemini-api", "vertex"] = "gemini-api"
+    # openai-compatible = 任何说 OpenAI 聊天接口的模型服务（本地 Ollama、Cloud Run 上的 vLLM、OpenAI 本身），
+    # 需要 LLM_BASE_URL 和 LLM_MODEL（API 密钥可选：Ollama 本地不需要）。
+    llm_provider: Literal["gemini-api", "vertex", "openai-compatible"] = "gemini-api"
     gcp_project: str = ""
     gcp_location: str = "us-central1"
     # 采样温度（每个 token 怎么选）：空 = 用模型默认值；0 = 最稳定、可复现。范围 0 到 2。
     llm_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     # 扩展思考的 token 预算：空 = 用模型默认；0 = 关闭；-1 = 模型自己决定；正数 = 上限。思考要额外计费。
     llm_thinking_budget: int | None = Field(default=None, ge=-1, le=32768)
+    llm_base_url: str = ""  # 例如 http://localhost:11434/v1（Ollama）
+    llm_model: str = ""  # 例如 gemma4:26b
+    llm_api_key: SecretStr = SecretStr("")
     llm_timeout_seconds: float = 30.0
+    # 自己托管的模型：第一次加载、长上下文的预填充都比云端 API 慢，所以给 openai-compatible 单独一个更宽松的超时。
+    llm_compat_timeout_seconds: float = 300.0
     llm_max_attempts: int = 4  # 遇到 429/503 时的最大尝试次数（含第一次）；设为 1 表示不重试
     # Agent 最多调用模型多少轮。硬上限，防止死循环烧钱。
     agent_max_steps: int = 12  # 评估里 v2 用 12：多查几个服务需要更多的步数（v1 的 8 步在两个案例里用完了）

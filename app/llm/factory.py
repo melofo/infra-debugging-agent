@@ -9,6 +9,7 @@ from google.auth.exceptions import DefaultCredentialsError
 from app.config import Settings
 from app.llm.base import LLMClient
 from app.llm.gemini import GeminiClient
+from app.llm.openai_compat import OpenAICompatClient
 
 
 class LLMNotConfigured(Exception):
@@ -22,6 +23,17 @@ VERTEX_CREDENTIALS_HELP = (
 
 
 def create_llm_client(settings: Settings) -> LLMClient:
+    if settings.llm_provider == "openai-compatible":
+        if not settings.llm_base_url or not settings.llm_model:
+            raise LLMNotConfigured("LLM_BASE_URL and LLM_MODEL must be set when LLM_PROVIDER=openai-compatible")
+        return OpenAICompatClient(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            api_key=settings.llm_api_key.get_secret_value(),
+            timeout_seconds=settings.llm_compat_timeout_seconds,
+            max_attempts=settings.llm_max_attempts,
+            temperature=settings.llm_temperature,
+        )
     if settings.llm_provider == "vertex":
         if not settings.gcp_project or not settings.gemini_model:
             raise LLMNotConfigured("GCP_PROJECT and GEMINI_MODEL must be set when LLM_PROVIDER=vertex")

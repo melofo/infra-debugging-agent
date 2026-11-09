@@ -58,6 +58,7 @@ Caveats: the scenarios are synthetic and come from one generator, 30 cases give 
 | `docs/gcp-deploy-checklist.md` | the Google Cloud deployment with an honest status per step (the self-hosted GPU model is the one open item) |
 | `docs/interview-prep.md` | interview preparation notes for this project: pitches, STAR stories from real events, technical Q&A, honest limits (Chinese and English) |
 | `docs/fde-role-mapping.md` | requirements of two Forward Deployed Engineer roles mapped to evidence in this project, the gaps stated honestly, the project's resume entries, a delivery playbook and common questions (Chinese) |
+| `docs/resume-bullets.md` | the project's resume entries (final wording), the self-hosted model entry with its done and planned parts, and what must not be claimed (Chinese and English) |
 
 ## Run locally
 

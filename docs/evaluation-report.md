@@ -119,7 +119,30 @@ Question: does lowering the sampling temperature to 0 (the model picks the most 
 
 Result: **no measurable effect on accuracy** (paired sign test on 6 scenarios: no case changed, p = 1.0). The test cannot show an improvement here, because the default is already at the ceiling (18/18), so the only thing it can establish is "no worse". Latency was higher at temperature 0 in this one sitting; with 18 runs and a rate-limited free tier (retries wait 8 s or more) this is not evidence that temperature 0 is slower, and it was not investigated further. Decision: **keep the default** (`LLM_TEMPERATURE` unset); the setting stays available and is recorded per run. A harder set, where the default is not already perfect, would be needed to see whether lower temperature reduces run-to-run variation.
 
-### 5.6 Retrieval (separate evaluation of the knowledge search)
+### 5.6 A self-hosted open model (Gemma 4 26B through Ollama)
+
+Question: can the same agent run on a model hosted on my own machine, and what does it cost in quality? The agent code is unchanged; a second adapter (`app/llm/openai_compat.py`, `LLM_PROVIDER=openai-compatible`) translates our message and tool formats to the OpenAI chat format that Ollama, vLLM and OpenAI speak. Same held-out set (6 scenarios x 3 runs), v2, 12 steps, temperature 0, local Ollama with a 32K context, on a 64 GB Mac. The Gemini run used the default temperature.
+
+| | Gemini | Gemma 4, first run | Gemma 4, after the schema fix |
+|---|---|---|---|
+| Top-1 | 18/18 | 9/18 | 13/18 |
+| Runs failed because the 12 steps ran out | 0 | 9 | 5 |
+| Reports rejected for invalid format | 0 | 25 | 0 |
+| Runs with a report rejected for unverifiable evidence | 0 | 0 | 12 of the 13 that finished |
+| Accuracy among runs that finished | 18/18 | 9/9 | 13/13 |
+| Model calls, input / output tokens per run | 8.2, 21k / 0.5k | 11.9, 28k / 5.5k | 10.8, 25k / 3.9k |
+| Latency p50 / p95 | 8 s / 32 s | 95 s / 447 s | 88 s / 113 s |
+| Input tokens served from the server's cache | n/a | 89% | 91% |
+
+What happened, in order:
+
+1. **The smaller model understood the incidents but could not fill the report.** All 9 failures were "ran out of steps", none a wrong diagnosis. A trace showed it writing `hypothesis` instead of `root_cause` and evidence as plain strings, correcting itself step by step until the budget ended.
+2. **Cause: JSON Schema references.** Our report schema nests objects through `$ref` pointers. Gemini's SDK expands them for us; an OpenAI-compatible server may not, so the model never saw the evidence fields. Expanding the references inside the adapter (the core code is untouched) removed all 25 format rejections.
+3. **New bottleneck: verbatim evidence.** 12 of the 13 finished runs had a report rejected once because a reference was a paraphrase, not the exact tool output (Gemini: none). The grounding check did its job; the smaller model needs more steps to satisfy it, which is where the remaining 5 failures come from.
+
+Reading the numbers: accuracy 50% -> 72% is not distinguishable from chance on 6 scenarios (sign test p = 0.625), and 72% against Gemini's 100% is not either (p = 0.125); four scenarios were unstable across repeats. The solid results are the mechanism ones: format rejections 25 -> 0, and the finished runs were all correct. The remaining gap is about following the output contract and the step budget, not about diagnosis. Limits: one model and one machine (latency and throughput are specific to it), synthetic scenarios, not yet tried with more steps or a stricter rejection message, and not yet run on a cloud GPU.
+
+### 5.7 Retrieval (separate evaluation of the knowledge search)
 
 35 labeled queries, document-level hit@3 and mean reciprocal rank (MRR):
 
@@ -158,6 +181,7 @@ python scripts/eval_agent.py --llm latest_deploy
 python scripts/eval_agent.py --llm gemini --agent v2 --max-steps 12 --sleep 15 --out eval_results/v2-dev.jsonl
 python scripts/eval_agent.py --llm gemini --split holdout --agent v2 --max-steps 12 --repeat 3 --out eval_results/v2-holdout.jsonl
 python scripts/eval_agent.py --llm gemini --split holdout --agent v2 --max-steps 12 --repeat 3 --temperature 0 --out eval_results/v2-holdout-temp0.jsonl
+LLM_PROVIDER=openai-compatible LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=gemma4:26b python scripts/eval_agent.py --llm real --split holdout --agent v2 --max-steps 12 --repeat 3 --temperature 0 --out eval_results/gemma4-26b-holdout.jsonl
 python scripts/compare_evals.py eval_results/run2.jsonl eval_results/v2-dev.jsonl    # paired comparison, sign test
 python scripts/eval_agent.py --rescore eval_results/run2.jsonl                       # re-score saved results with the current rule
 python scripts/eval_retrieval.py                                                     # retrieval evaluation

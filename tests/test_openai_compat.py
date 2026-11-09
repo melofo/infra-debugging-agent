@@ -216,3 +216,54 @@ async def test_a_bad_report_is_sent_back_through_the_adapter_and_the_model_can_f
     assert result.report is not None
     rejection = server.bodies()[2]["messages"][-1]
     assert rejection["role"] == "tool" and "error" in rejection["content"]
+
+
+# ---------------------------------------------------------------- JSON Schema 引用展开
+def test_refs_are_inlined_and_defs_removed():
+    from app.llm.openai_compat import inline_refs
+
+    schema = {
+        "type": "object",
+        "properties": {"items": {"type": "array", "items": {"$ref": "#/$defs/Item"}}, "one": {"$ref": "#/$defs/Item", "description": "the one"}},
+        "$defs": {"Item": {"type": "object", "properties": {"inner": {"$ref": "#/$defs/Leaf"}}}, "Leaf": {"type": "string"}},
+    }
+    out = inline_refs(schema)
+    assert "$defs" not in json.dumps(out) and "$ref" not in json.dumps(out)
+    assert out["properties"]["items"]["items"] == {"type": "object", "properties": {"inner": {"type": "string"}}}  # 两层嵌套都展开了
+    assert out["properties"]["one"]["description"] == "the one" and out["properties"]["one"]["type"] == "object"  # 引用旁边的其他字段保留
+
+
+def test_cyclic_and_unknown_refs_do_not_loop_forever():
+    from app.llm.openai_compat import inline_refs
+
+    cyclic = {"properties": {"a": {"$ref": "#/$defs/A"}, "x": {"$ref": "#/$defs/Missing"}}, "$defs": {"A": {"properties": {"back": {"$ref": "#/$defs/A"}}}}}
+    out = inline_refs(cyclic)
+    assert out["properties"]["a"]["properties"]["back"] == {} and out["properties"]["x"] == {}
+
+
+async def test_the_real_report_schema_reaches_the_server_fully_expanded():
+    from app.agent.common import submit_spec
+
+    server = Server(answer())
+    await client(server).generate_with_tools([Message(role="user", text="go")], [submit_spec()])
+    sent = json.dumps(server.bodies()[0]["tools"])
+    assert "$ref" not in sent and "$defs" not in sent
+    for field in ("root_cause", "confidence", "evidence", "reference", "summary", "source"):  # 模型必须能看到的字段
+        assert f'"{field}"' in sent
+
+
+def test_the_original_spec_is_not_mutated():
+    from app.agent.common import submit_spec
+    from app.llm.openai_compat import inline_refs
+
+    spec = submit_spec()
+    before = json.dumps(spec.parameters, sort_keys=True)
+    inline_refs(spec.parameters)
+    assert json.dumps(spec.parameters, sort_keys=True) == before  # Gemini 路径还要用原样的 schema
+
+
+def test_a_field_next_to_a_ref_overrides_the_referenced_definition():
+    from app.llm.openai_compat import inline_refs
+
+    schema = {"properties": {"a": {"$ref": "#/$defs/T", "description": "specific"}}, "$defs": {"T": {"type": "string", "description": "generic"}}}
+    assert inline_refs(schema)["properties"]["a"] == {"type": "string", "description": "specific"}  # 引用处写的说明优先

@@ -11,6 +11,9 @@
                     -> 这里按顺序生成 call_0、call_1…，回传时按同样的顺序对应（循环保证结果和调用一一对应、同序）
   工具结果          OpenAI 每个结果是一条单独的 role=tool 消息，Gemini 是一条消息里的多个 part
   思考内容          有些模型会返回 reasoning 字段，这里直接忽略，不混进答案里
+  JSON Schema 引用  Pydantic 生成的参数说明里，嵌套对象写成 {"$ref": "#/$defs/Hypothesis"}（"去 $defs 里查"）。
+                    Gemini 的 SDK 会替我们展开；不少 OpenAI 兼容服务不会，小模型就看不到嵌套对象的字段，只能瞎猜
+                    （实测：Gemma 把 root_cause 写成 hypothesis、把证据写成纯字符串）-> 这里先把引用展开再发出去
 
 用 httpx 直接调用（项目本来就依赖它），不引入 openai 这个 SDK：这个适配器只用到一个接口，几十行就够，少一个依赖。
 """
@@ -57,7 +60,7 @@ class OpenAICompatClient:
         body = {
             "messages": ([{"role": "system", "content": system}] if system else []) + _to_openai_messages(messages),
             "tools": [
-                {"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.parameters}}
+                {"type": "function", "function": {"name": t.name, "description": t.description, "parameters": inline_refs(t.parameters)}}
                 for t in tools
             ],
         }
@@ -95,6 +98,31 @@ class OpenAICompatClient:
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+
+def inline_refs(schema: dict) -> dict:
+    """把 JSON Schema 里的 {"$ref": "#/$defs/X"} 原地展开成 X 的定义，并去掉 $defs。
+
+    只处理本文件内的引用（#/$defs/...）；遇到循环引用（A 引用 B、B 又引用 A）就在第二次进入时停下，
+    留一个空对象，避免无限展开。我们的报告格式没有循环，这是防御。
+    """
+    defs = schema.get("$defs", {})
+
+    def resolve(node, seen: tuple[str, ...]):
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                name = ref.removeprefix("#/$defs/")
+                if name in seen or name not in defs:
+                    return {}
+                merged = {**resolve(defs[name], (*seen, name)), **{k: resolve(v, seen) for k, v in node.items() if k != "$ref"}}
+                return merged
+            return {k: resolve(v, seen) for k, v in node.items() if k != "$defs"}
+        if isinstance(node, list):
+            return [resolve(item, seen) for item in node]
+        return node
+
+    return resolve(schema, ())
 
 
 def _to_openai_messages(messages: list[Message]) -> list[dict]:

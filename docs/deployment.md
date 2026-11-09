@@ -1,6 +1,6 @@
 # Deployment
 
-Two parts. **Local containers** were built and exercised for real (see "What was verified"). The **Cloud Run** part is a guide written from the design and the platform's documented behavior; it has **not been executed** because it needs a GCP project. Treat its commands as a checklist to try, and expect to adjust names and flags.
+Two parts, both executed. **Local containers** were built and exercised for real (see "What was verified"). The **Google Cloud** part (section 3) was executed in a dedicated project: Cloud Run (API, worker pool, frontend), Cloud SQL with pgvector, Secret Manager, Artifact Registry and Cloud Build, with Gemini reached through the service account (no API key). A self-hosted model on a Cloud Run GPU is **not** done yet (section 3.7).
 
 ## 1. Run everything in containers locally
 
@@ -51,7 +51,11 @@ Set `ENVIRONMENT=production`. The application then **refuses to start** unless `
 | Variable | Purpose | Where it should come from |
 |---|---|---|
 | `DATABASE_URL` | Postgres connection (needs the `vector` extension for knowledge search) | secret |
-| `GEMINI_API_KEY`, `GEMINI_MODEL` | model access | secret / config |
+| `LLM_PROVIDER` | `gemini-api` (API key), `vertex` (Gemini on Google Cloud, service-account identity, no key; the platform is now called Gemini Enterprise Agent Platform) or `openai-compatible` (Ollama, vLLM, OpenAI) | config |
+| `GEMINI_API_KEY` | model access when `LLM_PROVIDER=gemini-api` | secret |
+| `GEMINI_MODEL` | model name for both Gemini channels | config |
+| `GCP_PROJECT`, `GCP_LOCATION` | for `vertex`; a model may exist only in the `global` location (the one used here returned 404 in `us-central1`) | config |
+| `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_AUTH` | for `openai-compatible`; `LLM_AUTH=google-id-token` sends a service-account identity token to a private Cloud Run model server | config / secret |
 | `JIRA_WEBHOOK_SECRET` | HMAC key for `/webhooks/jira` (fails closed when empty) | secret |
 | `CORS_ORIGINS` | JSON array of the web UI origins | config |
 | `WORKER_ENABLED` | run the worker inside the web process | config |
@@ -61,58 +65,94 @@ Set `ENVIRONMENT=production`. The application then **refuses to start** unless `
 | `OTEL_EXPORTER_OTLP_HEADERS` | OTLP auth headers (standard variable, read by the exporter) | secret |
 | `PORT` | listen port (Cloud Run sets it) | platform |
 
-## 3. Cloud Run (guide, not executed)
+## 3. Google Cloud (executed)
 
-Pieces: Artifact Registry (images), Cloud SQL for PostgreSQL with pgvector (database), Secret Manager (secrets), Cloud Run (web, and the frontend as a second service).
+A dedicated project, so that deleting the project is a complete clean-up. Region `us-central1` for the services; the Gemini model itself is called in the `global` location.
+
+### 3.1 What runs where
+
+| Piece | Service | Notes |
+|---|---|---|
+| API | Cloud Run **service** | `WORKER_ENABLED=false`, scales 0-2, public URL (the API enforces its own API keys and the webhook HMAC) |
+| Worker | Cloud Run **worker pool** | the same image with the start command overridden to `python scripts/run_worker.py`; no HTTP port, so it cannot be a service; one always-on instance (it polls the queue) |
+| Frontend | Cloud Run **service** | its own image; `NEXT_PUBLIC_API_URL` is a build argument |
+| Database | Cloud SQL for PostgreSQL 17 | shared-core tier, single zone, no backups (a demo), public IP with **no authorized networks**: Cloud Run connects through the built-in connector, an operator through the Cloud SQL Auth Proxy |
+| Knowledge base | tables in that same database | `knowledge_documents` and `knowledge_chunks` (`vector(768)`, HNSW cosine index), filled by a one-off Cloud Run **job** that runs `scripts/ingest_knowledge.py` with the service account (Vertex embeddings) |
+| Secrets | Secret Manager | database password, database URL, webhook secret, the first admin API key; the runtime service account can read only the ones it needs |
+| Identity | one service account | roles: Cloud SQL Client, Vertex AI User (Gemini and embeddings); no key file exists |
+| Images | Artifact Registry | built by Cloud Build from the *committed* files (`git archive`), so no local `.env` or result files can leak in; the build must run remotely because a Mac produces arm64 images and Cloud Run needs amd64 |
+
+### 3.2 The sequence that was run (variables, not real values)
 
 ```bash
-PROJECT=my-project REGION=europe-west1
-gcloud config set project $PROJECT
+# project and billing (a new project; never link billing to a project that holds an API key you rely on)
+gcloud projects create "$PROJECT" && gcloud billing projects link "$PROJECT" --billing-account="$BILLING"
+gcloud services enable run.googleapis.com sqladmin.googleapis.com artifactregistry.googleapis.com \
+  secretmanager.googleapis.com cloudbuild.googleapis.com aiplatform.googleapis.com --project="$PROJECT"
+gcloud artifacts repositories create agent --repository-format=docker --location=us-central1
 
-# 1. Images
-gcloud artifacts repositories create agent --repository-format=docker --location=$REGION
-docker build -t $REGION-docker.pkg.dev/$PROJECT/agent/backend .
-docker push   $REGION-docker.pkg.dev/$PROJECT/agent/backend
+# database: a random password goes straight into Secret Manager (never echoed)
+gcloud sql instances create agent-db --database-version=POSTGRES_17 --edition=ENTERPRISE --tier=db-g1-small \
+  --region=us-central1 --storage-size=10GB --availability-type=zonal --no-backup
+gcloud sql databases create agent --instance=agent-db
+gcloud sql users create agent --instance=agent-db --password="$PW"     # members get CREATE EXTENSION rights
 
-# 2. Database: Cloud SQL for PostgreSQL 15+ supports the pgvector extension (CREATE EXTENSION vector).
-#    The application creates its tables itself at startup (idempotent, protected by an advisory lock).
+# images (remote build from the committed files)
+gcloud builds submit "$EXPORT_DIR" --tag us-central1-docker.pkg.dev/$PROJECT/agent/backend:v1
+# frontend: a build step passes --build-arg NEXT_PUBLIC_API_URL=<the API URL>
 
-# 3. Secrets (never put values on the command line in shell history you keep; use --data-file)
-gcloud secrets create gemini-api-key --data-file=-          # paste, then Ctrl-D
-gcloud secrets create database-url   --data-file=-
-gcloud secrets create jira-webhook-secret --data-file=-
+# API: Gemini through the service account, secrets from Secret Manager
+gcloud run deploy agent-api --image ... --service-account "$SA" --add-cloudsql-instances "$CONN" \
+  --set-env-vars "^@^ENVIRONMENT=production@WORKER_ENABLED=false@LLM_PROVIDER=vertex@GCP_PROJECT=$PROJECT@GCP_LOCATION=global@GEMINI_MODEL=...@CORS_ORIGINS=[...]" \
+  --set-secrets "DATABASE_URL=database-url:latest,JIRA_WEBHOOK_SECRET=jira-webhook-secret:latest" \
+  --min-instances 0 --max-instances 2 --timeout 3600 --port 8000 --allow-unauthenticated
 
-# 4. A dedicated service account with least privilege
-gcloud iam service-accounts create agent-run
-#    roles: roles/cloudsql.client, roles/secretmanager.secretAccessor (on those secrets only),
-#           roles/cloudtrace.agent (if exporting traces)
+# worker: same image, different start command, always on
+gcloud run worker-pools deploy agent-worker --image ... --command python --args scripts/run_worker.py --instances 1 ...
 
-# 5. Deploy the API
-gcloud run deploy agent-api \
-  --image $REGION-docker.pkg.dev/$PROJECT/agent/backend --region $REGION \
-  --service-account agent-run@$PROJECT.iam.gserviceaccount.com \
-  --add-cloudsql-instances $PROJECT:$REGION:agent-db \
-  --set-env-vars ENVIRONMENT=production,WORKER_ENABLED=true,CORS_ORIGINS='["https://ui.example.com"]' \
-  --set-secrets GEMINI_API_KEY=gemini-api-key:latest,DATABASE_URL=database-url:latest,JIRA_WEBHOOK_SECRET=jira-webhook-secret:latest \
-  --min-instances 1 --no-cpu-throttling --timeout 3600 --port 8000 \
-  --allow-unauthenticated    # the API enforces its own API keys; Jira cannot use Google IAM for the webhook
+# knowledge base: a one-off job; first admin key: from a laptop through the Cloud SQL Auth Proxy (stored in Secret Manager)
+gcloud run jobs create ingest-knowledge --image ... --command python --args scripts/ingest_knowledge.py ... && gcloud run jobs execute ingest-knowledge --wait
+
+# frontend, then allow its origin(s) in the API
+gcloud run deploy agent-frontend --image .../frontend:v1 --port 3000 --allow-unauthenticated
+gcloud run services update agent-api --update-env-vars "^@^CORS_ORIGINS=[\"https://frontend-url-1\",\"https://frontend-url-2\"]"
 ```
 
-`DATABASE_URL` for Cloud SQL over the built-in connector is `postgresql://USER:PASSWORD@/agent?host=/cloudsql/PROJECT:REGION:INSTANCE`.
+### 3.3 Where it differs from the earlier design
 
-Decisions to understand before copying the flags:
+- The worker is a **separate worker pool**, not an in-process thread, so the API can scale to zero (the old design needed `--min-instances 1 --no-cpu-throttling` on the API).
+- Model access is the service account's own identity (`LLM_PROVIDER=vertex`), so there is **no model API key** anywhere in the deployment.
+- Cloud Run gives a service two valid URLs; the browser's origin is whichever one is opened, so both are listed in `CORS_ORIGINS`.
+- Knowledge ingestion runs as a job with the runtime service account instead of from a laptop (it needs Google credentials for the embeddings); the first admin key is created from a laptop through the proxy so that it is never written to a job's logs.
 
-- **Where the worker runs.** Cloud Run only allocates CPU while a request is being served (unless `--no-cpu-throttling`). An in-process worker therefore needs `--min-instances 1 --no-cpu-throttling`, which is billed continuously. The scalable alternative is `WORKER_ENABLED=false` on the API and the same image running `scripts/run_worker.py` as a separate always-on process (a Cloud Run worker pool if available to you, otherwise GKE or a VM). That script opens no port, so it cannot be a plain Cloud Run service.
-- **Timeouts.** Streaming chat answers use SSE; `--timeout 3600` lets them outlive the default 5 minutes. A single investigation is bounded by `JOB_TIMEOUT_SECONDS`.
-- **Several instances at once** is safe: schema creation takes an advisory lock, the job queue uses `FOR UPDATE SKIP LOCKED` with fencing, and sessions use a lease plus version check in Postgres.
-- **The webhook is public by necessity**, so its protection is the HMAC signature (constant-time comparison, fail closed). Consider Cloud Armor rules limiting it to Jira's published addresses.
-- **First admin key.** Do not run the key script as a Cloud Run job (the key would be printed into logs). Run it from a machine that reaches the database through the Cloud SQL Auth Proxy.
-- **Frontend.** Build it with the API's public URL, `docker build --build-arg NEXT_PUBLIC_API_URL=https://agent-api-xxxx.a.run.app frontend`, deploy as a second service, and put its URL in the API's `CORS_ORIGINS`. The API key lives in the browser's `sessionStorage` (documented limitation); a cookie-based session would be stronger.
-- **Tracing.** Point `OTEL_EXPORTER=otlp` at an OpenTelemetry Collector (a sidecar container) that exports to Cloud Trace; the app only speaks OTLP and stays vendor-neutral. Logs are JSON on stdout and already carry `trace_id`.
-- **Model access.** This project uses a Gemini API key. On GCP the more usual route is Vertex AI with the service account's own identity (no key to store); that needs a new `LLMClient` implementation behind the existing interface and is not done.
+### 3.4 What was verified on the deployed system
+
+- Health check, and a protected endpoint without a key returns 401.
+- All webhook behaviours against the public URL, each as expected: bad signature, tampered body, missing signature and wrong algorithm are rejected with 401; a Task, an update event and a ticket without data are ignored with 200; a redelivery is recognised as a duplicate; a correct signed event is queued with 202.
+- Startup created the eight tables and the `vector` extension; the knowledge job embedded 13 documents into 49 chunks.
+- End to end through the real path (signed webhook, queue, worker, Gemini, report), **all 36 evaluation scenarios were answered correctly in one run each** (30 of 30 development, 6 of 6 held-out, no errors), with `scripts/eval_deployed.py`: 7.0 model calls and about 16,200 input / 480 output tokens per investigation, wall time p50 8.1 s and p95 10.9 s including queueing. Model: a small, fast Gemini model. Limits: one run per scenario, synthetic data, and the development scorer was tuned after seeing outputs, so the held-out 6 of 6 is the figure to trust.
+- The chat UI (streamed steps, knowledge search citing runbook and past-incident ids) was used by hand in a browser.
+
+### 3.5 Problems met while doing it
+
+- In zsh, `$PROJECT:us-central1:db` applies the `:u` modifier (upper-case) to the variable, which corrupted the Cloud SQL connection name inside a secret. Use `${PROJECT}`.
+- The Gemini model used here answers in the `global` location and returns 404 in `us-central1`; the embedding model works in both.
+- The `gcloud run worker-pools` commands need the `grpc` Python module; a gcloud installed with a system Python needs it installed in that environment.
+- `scripts/simulate_jira.py --wait` crashed against a protected backend (it polled the job without an API key); it now sends `AGENT_API_KEY` on the polling request only.
+
+### 3.6 Cost and clean-up
+
+Billed continuously while it runs (estimates from list prices, not invoices): the Cloud SQL instance (about $1 a day) and the always-on worker (about $1.70 a day); the API and frontend scale to zero. A budget alert does **not** cap spending. Clean-up is deleting the project (`gcloud projects delete`), which removes everything in it; do not link billing to a project that holds an API key you still rely on.
+
+### 3.7 Not done
+
+- A self-hosted open model on a Cloud Run GPU (planned: vLLM, private service, identity-token auth; the adapter for it exists and is tested, see section 5.6 of the evaluation report for the local-model results).
+- OpenTelemetry export to Cloud Trace (logs are JSON on stdout with `trace_id`; no collector is deployed).
+- A load test, Cloud Armor in front of the webhook, a CI deploy pipeline, high availability and backups for the database, and a migration tool.
 
 ## 4. Not done / honest gaps
 
-- Nothing here was run on GCP. No load test was done, and there is no CI pipeline yet (a natural next step: build images, run the test suite, run the evaluation baselines on every change).
+- No load test was done. CI exists (see the architecture document) but does not deploy.
 - The image has not been vulnerability-scanned (try `docker scout` or Trivy) and uses floating base-image tags (`python:3.11-slim`, `node:22-slim`); pin digests for reproducible builds.
 - No database migration tool: tables are created idempotently from `app/schema.sql`. That is fine for adding tables; changing or dropping columns needs a real migration tool (Alembic).
+- The data sources are simulated, so the deployed system investigates simulated incidents; real connectors are the next step.

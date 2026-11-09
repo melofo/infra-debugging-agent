@@ -139,12 +139,13 @@ Limits, stated plainly: the gate uses the model's self-reported confidence, whic
 
 - **Containers:** multi-stage images, non-root user, no secrets or test tools inside, `ENVIRONMENT=production` refuses unsafe settings at startup.
 - **CI:** backend tests against a real pgvector database (a missing database fails the run instead of skipping tests), frontend lint, type check, tests and build, a smoke test of the real containers, a non-blocking dependency audit.
+- **Deployed shape (Google Cloud):** API and frontend as Cloud Run services, the worker as a Cloud Run worker pool (same image, different start command), Cloud SQL with pgvector for queue, sessions and knowledge, one least-privilege service account used for the database connector and for Gemini, secrets in Secret Manager. Details and what was verified: `docs/deployment.md`.
 - **Observability:** traces (`job.process` > `agent.turn` > `llm.generate` and `tool.execute`), metrics, JSON logs that carry `trace_id`.
 
 ## 8. What would change for a real deployment
 
 1. Replace the three simulated tool back ends with real Jira, log and Git/CI connectors, each with its own read-only credential held by the tool (never by the model).
-2. Vertex AI (service-account identity, no API key to store) behind the existing `LLMClient` interface.
+2. ~~Gemini through the service account~~ (done: `LLM_PROVIDER=vertex`, used on the deployed system) and a second provider adapter for any OpenAI-compatible server (done, `app/llm/openai_compat.py`).
 3. A cookie-based session in place of the API key in the browser, SSO for operators.
 4. A real migration tool (Alembic) once columns change; a database role for the audit log that can only insert and select.
 5. Rate limiting, a load test, image scanning, pinned base-image digests and pinned action SHAs.

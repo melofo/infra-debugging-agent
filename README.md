@@ -41,7 +41,9 @@ Measured, with their limits stated. Details in *End-to-end evaluation* below.
 | Held-out set (6 unseen incident types, 3 runs each) | v1 0/18, v2 18/18 (paired sign test p = 0.031); cause confirmed: v2 searches the other service's logs in 18/18 vs 0/18 |
 | Cost of v2 | about +21% input tokens per investigation, latency about the same |
 | Retrieval (35 labeled queries) | vector search hit@3 1.00 vs BM25 0.80; on queries sharing almost no words with their answer 1.00 vs 0.25 |
-| Tests | 715 backend and 45 frontend tests, mutation-checked; CI green |
+| Deployed on Google Cloud (Cloud Run + Cloud SQL, Gemini via service account), 36 scenarios through the real webhook-queue-worker path | 36/36 Top-1 (held-out 6/6), 7.0 model calls and ~16k input tokens per investigation, p50 8.1 s / p95 10.9 s end to end; one run per scenario, synthetic data |
+| Self-hosted open model (Gemma 4 26B via Ollama, local), held-out set | 9/18 at first (all failures were the step budget; 25 invalid-format rejections), 13/18 after expanding JSON Schema references in the adapter; Gemini 18/18 |
+| Tests | 881 backend and 45 frontend tests, mutation-checked; CI green |
 
 Caveats: the scenarios are synthetic and come from one generator, 30 cases give wide intervals, keyword scoring is coarse, and the step-budget control run failed because of a Gemini quota error. Numbers are good for comparing versions of this agent, not for claiming real-world accuracy.
 
@@ -52,8 +54,8 @@ Caveats: the scenarios are synthetic and come from one generator, 30 cases give 
 | `docs/architecture.md` | component and sequence diagrams, trust boundaries, data model, decisions and trade-offs, failure modes, what would change for production |
 | `docs/evaluation-report.md` | dataset design, scoring, reference lines, results with the real model, cost and latency, retrieval evaluation, threats to validity |
 | `docs/demo-script.md` | a five-minute live demo with commands and what to say |
-| `docs/deployment.md` | containers (verified), production settings, a Cloud Run guide (not executed) |
-| `docs/gcp-deploy-checklist.md` | the step-by-step Google Cloud deployment (Cloud Run, Cloud SQL, Vertex AI) with a status per step |
+| `docs/deployment.md` | containers (verified), production settings, the Google Cloud deployment as executed (Cloud Run, Cloud SQL, Gemini through a service account) |
+| `docs/gcp-deploy-checklist.md` | the Google Cloud deployment with an honest status per step (the self-hosted GPU model is the one open item) |
 
 ## Run locally
 
@@ -74,7 +76,8 @@ GEMINI_MODEL=a-gemini-model-id-available-to-you
 # LOG_LEVEL=INFO
 # LLM_TIMEOUT_SECONDS=30
 # LLM_MAX_ATTEMPTS=4      # attempts on 429/503, with exponential backoff
-# LLM_PROVIDER=gemini-api # or vertex: Gemini on Google Cloud Vertex AI with a service account (no API key); also set GCP_PROJECT and GCP_LOCATION
+# LLM_PROVIDER=gemini-api # or vertex: Gemini on Google Cloud (Vertex AI, now Gemini Enterprise Agent Platform) with a service account, no API key; also set GCP_PROJECT and GCP_LOCATION
+#                         # or openai-compatible: Ollama, vLLM, OpenAI (LLM_BASE_URL, LLM_MODEL, optional LLM_API_KEY; LLM_AUTH=google-id-token for a private Cloud Run model server)
 # AGENT_VARIANT=v2        # v2 = list_services tool + "beyond deploys" prompt; v1 = previous behavior; v3 = experiment (v2 with XML tags and one example, not evaluated)
 # LLM_TEMPERATURE=         # unset = model default (temperature 0 made no difference on the held-out set, see docs/evaluation-report.md)
 # LLM_THINKING_BUDGET=     # unset = model default; 0 = off; -1 = model decides; or a token limit
@@ -305,7 +308,7 @@ app/                 FastAPI backend
 frontend/            Next.js UI
 scripts/             operations and evaluation CLIs (key management, worker, ingestion, eval, smoke test, ...)
 data/                simulated scenarios, knowledge base documents, evaluation queries
-docs/deployment.md   container verification, production settings, Cloud Run guide
+docs/deployment.md   container verification, production settings, Google Cloud deployment record
 tests/               pytest suite (real PostgreSQL where it matters, scripted fake LLMs elsewhere)
 ```
 
@@ -319,6 +322,6 @@ Fake LLMs make the suite deterministic and free (and the test environment has th
 - Evaluation numbers come from synthetic scenarios and a keyword scorer (adjusted twice after seeing outputs); the held-out set is small. See the caveats under *Results*.
 - No rate limiting. The API key lives in `sessionStorage` in the browser (an HttpOnly cookie session would be stronger). Sessions do not use MCP.
 - Jira write-back posts to a simulated outbox; a crash exactly while posting leaves the action in `executing` for a human to check.
-- Cloud Run deployment is documented in `docs/deployment.md` but was never executed. No load test, no image vulnerability scan, floating base-image tags, no schema migration tool (tables are created idempotently).
+- The system was deployed on Google Cloud (see `docs/deployment.md`), but there is no load test, no Cloud Trace export, no database high availability or backups, no image vulnerability scan, floating base-image tags and no schema migration tool (tables are created idempotently). A self-hosted GPU model is not deployed yet.
 - Free-tier Gemini quotas can throttle multi-step investigations and evaluation runs (a control run was lost to a 429).
 - Authentication uses one shared database; there is no per-tenant isolation beyond session ownership.

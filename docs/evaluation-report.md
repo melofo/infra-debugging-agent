@@ -142,7 +142,22 @@ What happened, in order:
 
 Reading the numbers: accuracy 50% -> 72% is not distinguishable from chance on 6 scenarios (sign test p = 0.625), and 72% against Gemini's 100% is not either (p = 0.125); four scenarios were unstable across repeats. The solid results are the mechanism ones: format rejections 25 -> 0, and the finished runs were all correct. The remaining gap is about following the output contract and the step budget, not about diagnosis. Limits: one model and one machine (latency and throughput are specific to it), synthetic scenarios, not yet tried with more steps or a stricter rejection message, and not yet run on a cloud GPU.
 
-### 5.7 Retrieval (separate evaluation of the knowledge search)
+### 5.7 The deployed system, end to end
+
+Question: does the deployed system (not just the agent code) work? `scripts/eval_deployed.py` sends each scenario as a signed Jira webhook to the public API on Google Cloud, waits for the job through `GET /jobs/{id}` and scores the report with the same scorer. Everything in the path is real: authentication, the Postgres queue, the worker pool, Cloud SQL with pgvector, and Gemini reached through the service account (a small, fast model; one run per scenario).
+
+| | Result |
+|---|---|
+| Top-1 / Top-3, all 36 scenarios | 36 / 36, 36 / 36 |
+| Development set / held-out set | 30 / 30, 6 / 6 |
+| Scenarios with / without a culprit deploy | 15 / 15, 21 / 21 |
+| Errors (not queued, job failed, unreadable) | 0 |
+| Model calls, tokens per investigation | 7.0 calls, about 16,200 in / 480 out |
+| Wall time from webhook to result | p50 8.1 s, p95 10.9 s (includes queueing; the worker handles one job at a time) |
+
+Reading it: this is an acceptance check of the deployment, not new evidence about the agent. The development scorer was adjusted after seeing outputs, so the held-out 6 of 6 is the figure that carries weight, and each scenario ran once. It shows that the authentication, queue, worker, database and model channel all work together and what a real investigation costs in calls and tokens.
+
+### 5.8 Retrieval (separate evaluation of the knowledge search)
 
 35 labeled queries, document-level hit@3 and mean reciprocal rank (MRR):
 
@@ -182,6 +197,7 @@ python scripts/eval_agent.py --llm gemini --agent v2 --max-steps 12 --sleep 15 -
 python scripts/eval_agent.py --llm gemini --split holdout --agent v2 --max-steps 12 --repeat 3 --out eval_results/v2-holdout.jsonl
 python scripts/eval_agent.py --llm gemini --split holdout --agent v2 --max-steps 12 --repeat 3 --temperature 0 --out eval_results/v2-holdout-temp0.jsonl
 LLM_PROVIDER=openai-compatible LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=gemma4:26b python scripts/eval_agent.py --llm real --split holdout --agent v2 --max-steps 12 --repeat 3 --temperature 0 --out eval_results/gemma4-26b-holdout.jsonl
+JIRA_WEBHOOK_SECRET=... AGENT_API_KEY=... python scripts/eval_deployed.py --url https://your-api --split all   # a deployed instance, end to end
 python scripts/compare_evals.py eval_results/run2.jsonl eval_results/v2-dev.jsonl    # paired comparison, sign test
 python scripts/eval_agent.py --rescore eval_results/run2.jsonl                       # re-score saved results with the current rule
 python scripts/eval_retrieval.py                                                     # retrieval evaluation

@@ -267,3 +267,81 @@ def test_a_field_next_to_a_ref_overrides_the_referenced_definition():
 
     schema = {"properties": {"a": {"$ref": "#/$defs/T", "description": "specific"}}, "$defs": {"T": {"type": "string", "description": "generic"}}}
     assert inline_refs(schema)["properties"]["a"] == {"type": "string", "description": "specific"}  # 引用处写的说明优先
+
+
+# ---------------------------------------------------------------- Google 身份令牌认证（受 Cloud Run IAM 保护的模型服务）
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+def token_client(server, fetch, clock=None, **kw):
+    from app.llm.openai_compat import GoogleIdTokenAuth
+
+    auth = GoogleIdTokenAuth("https://model.run.app", fetch=fetch, clock=clock or Clock(), **kw)
+    return OpenAICompatClient("http://model.local/v1", "m", auth=auth, retry_delay_seconds=0.0, transport=httpx.MockTransport(server))
+
+
+async def test_every_request_carries_the_identity_token():
+    server, audiences = Server(answer()), []
+
+    def fetch(audience):
+        audiences.append(audience)
+        return "tok-1"
+
+    await token_client(server, fetch).generate("hi")
+    assert server.requests[0].headers["authorization"] == "Bearer tok-1" and audiences == ["https://model.run.app"]
+
+
+async def test_the_token_is_cached_and_refreshed_only_when_it_is_about_to_expire():
+    server, clock, calls = Server(answer()), Clock(), []
+
+    def fetch(audience):
+        calls.append(1)
+        return f"tok-{len(calls)}"
+
+    client = token_client(server, fetch, clock)
+    clock.now = 100  # 第一次取令牌的时间不能是 0，否则和"从没取过"的初始值分不开
+    await client.generate("a")
+    clock.now = 3099
+    await client.generate("b")
+    assert len(calls) == 1  # 距离第一次取只过了 2999 秒（还没到 3000）：复用
+    clock.now = 3100
+    await client.generate("c")
+    assert len(calls) == 2 and server.requests[2].headers["authorization"] == "Bearer tok-2"  # 到了：换新的
+
+
+async def test_concurrent_requests_fetch_the_token_once():
+    import asyncio
+
+    server, calls = Server(answer()), []
+
+    def fetch(audience):
+        import time
+
+        time.sleep(0.05)  # 慢一点，让几个请求真的同时到达
+        calls.append(1)
+        return "tok"
+
+    client = token_client(server, fetch)
+    await asyncio.gather(*(client.generate(str(i)) for i in range(4)))
+    assert len(calls) == 1
+
+
+async def test_a_failing_token_fetch_becomes_an_llm_error_without_details():
+    def fetch(audience):
+        raise RuntimeError("metadata server says: secret details")
+
+    with pytest.raises(LLMError, match="identity token") as info:
+        await token_client(Server(answer()), fetch).generate("hi")
+    assert "secret details" not in str(info.value)
+
+
+def test_the_factory_builds_the_token_auth_with_the_service_root_as_audience():
+    llm = create_llm_client(settings(llm_base_url="https://model-abc.us-central1.run.app/v1", llm_model="m", llm_auth="google-id-token"))
+    assert llm._http.auth._audience == "https://model-abc.us-central1.run.app"  # 去掉了 /v1
+    plain = create_llm_client(settings(llm_base_url="https://x/v1", llm_model="m"))
+    assert not hasattr(plain._http.auth, "_audience")  # 默认不用令牌认证

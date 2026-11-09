@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     llm_base_url: str = ""  # 例如 http://localhost:11434/v1（Ollama）
     llm_model: str = ""  # 例如 gemma4:26b
     llm_api_key: SecretStr = SecretStr("")
+    # 怎么向模型服务证明身份：api-key = 静态密钥（有就带上，没有就不带）；
+    # google-id-token = 用服务账号的 Google 身份令牌（模型服务部署在受 Cloud Run IAM 保护的地址上时用，没有密钥可泄露）。
+    llm_auth: Literal["api-key", "google-id-token"] = "api-key"
     llm_timeout_seconds: float = 30.0
     # 自己托管的模型：第一次加载、长上下文的预填充都比云端 API 慢，所以给 openai-compatible 单独一个更宽松的超时。
     llm_compat_timeout_seconds: float = 300.0

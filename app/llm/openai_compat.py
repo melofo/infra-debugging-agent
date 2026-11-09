@@ -21,12 +21,61 @@
 import asyncio
 import json
 import time
+from collections.abc import Callable
 
 import httpx
 
 from app.llm.base import LLMError, LLMResponse, Message, ToolCall, ToolSpec
 
 RETRY_STATUS = {429, 503}  # 和 Gemini 一样：只重试"过一会儿可能就好"的错误
+
+
+def _fetch_google_id_token(audience: str) -> str:
+    """向 Google 要一个"身份令牌"（ID token），证明"我是这个服务账号"。
+
+    在 Cloud Run 上，库会自动去元数据服务器取（用的是这个服务的服务账号，没有任何密钥文件）。
+    在你自己的 Mac 上用个人账号不行，那种情况改用 LLM_API_KEY=$(gcloud auth print-identity-token)。
+    """
+    import google.auth.transport.requests
+    from google.oauth2 import id_token
+
+    return id_token.fetch_id_token(google.auth.transport.requests.Request(), audience)
+
+
+class GoogleIdTokenAuth(httpx.Auth):
+    """给每个请求自动带上 Google 身份令牌（Authorization: Bearer ...），并在过期前换新的。
+
+    用在"受 Cloud Run IAM 保护"的模型服务上：没有令牌的请求在到达容器之前就被挡住了，
+    连 GPU 实例都不会被唤醒，所以不会有人用垃圾请求给你制造费用（比公开地址加 API 密钥更安全）。
+    令牌有效期一小时；这里缓存它，快到期（默认 50 分钟）才换，不是每个请求都去取。
+    取令牌是阻塞的网络调用，放到线程里执行，不卡住事件循环。
+    """
+
+    def __init__(
+        self,
+        audience: str,
+        fetch: Callable[[str], str] = _fetch_google_id_token,
+        refresh_after_seconds: float = 3000.0,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        self._audience, self._fetch, self._refresh_after, self._clock = audience, fetch, refresh_after_seconds, clock
+        self._token: str | None = None
+        self._fetched_at = 0.0
+        self._lock = asyncio.Lock()  # 同时来了几个请求，只取一次令牌
+
+    async def _get_token(self) -> str:
+        async with self._lock:
+            if self._token is None or self._clock() - self._fetched_at >= self._refresh_after:
+                try:
+                    self._token = await asyncio.to_thread(self._fetch, self._audience)
+                except Exception as exc:  # 各种认证库的异常统一成我们自己的 LLMError，细节不外泄
+                    raise LLMError("could not obtain a Google identity token for the model server") from exc
+                self._fetched_at = self._clock()
+            return self._token
+
+    async def async_auth_flow(self, request: httpx.Request):
+        request.headers["Authorization"] = f"Bearer {await self._get_token()}"
+        yield request
 
 
 class OpenAICompatClient:
@@ -39,6 +88,7 @@ class OpenAICompatClient:
         max_attempts: int = 3,
         retry_delay_seconds: float = 1.0,
         temperature: float | None = None,
+        auth: httpx.Auth | None = None,  # 例如 GoogleIdTokenAuth；给了它，Authorization 头由它负责
         transport: httpx.AsyncBaseTransport | None = None,  # 测试时换成假的传输层，不联网（类似 Java 里注入 MockWebServer）
     ):
         self._model = model
@@ -47,7 +97,7 @@ class OpenAICompatClient:
         self._retry_delay = retry_delay_seconds
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}  # Ollama 本地不需要密钥
         self._http = httpx.AsyncClient(
-            base_url=base_url.rstrip("/"), headers=headers, timeout=timeout_seconds, transport=transport
+            base_url=base_url.rstrip("/"), headers=headers, timeout=timeout_seconds, transport=transport, auth=auth
         )
 
     async def generate(self, prompt: str, system: str | None = None) -> LLMResponse:

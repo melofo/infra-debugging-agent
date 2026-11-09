@@ -4,12 +4,14 @@
 所以抽到这里共用：两处都不需要知道怎么拼配置，只管调用 create_llm_client。
 """
 
+from urllib.parse import urlsplit
+
 from google.auth.exceptions import DefaultCredentialsError
 
 from app.config import Settings
 from app.llm.base import LLMClient
 from app.llm.gemini import GeminiClient
-from app.llm.openai_compat import OpenAICompatClient
+from app.llm.openai_compat import GoogleIdTokenAuth, OpenAICompatClient
 
 
 class LLMNotConfigured(Exception):
@@ -26,7 +28,13 @@ def create_llm_client(settings: Settings) -> LLMClient:
     if settings.llm_provider == "openai-compatible":
         if not settings.llm_base_url or not settings.llm_model:
             raise LLMNotConfigured("LLM_BASE_URL and LLM_MODEL must be set when LLM_PROVIDER=openai-compatible")
+        auth = None
+        if settings.llm_auth == "google-id-token":
+            # 令牌的"受众"是服务的根地址（去掉 /v1 这样的路径）：Cloud Run 用它核对令牌是发给哪个服务的。
+            parts = urlsplit(settings.llm_base_url)
+            auth = GoogleIdTokenAuth(f"{parts.scheme}://{parts.netloc}")
         return OpenAICompatClient(
+            auth=auth,
             base_url=settings.llm_base_url,
             model=settings.llm_model,
             api_key=settings.llm_api_key.get_secret_value(),

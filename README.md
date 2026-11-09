@@ -57,6 +57,7 @@ Caveats: the scenarios are synthetic and come from one generator, 30 cases give 
 | `docs/deployment.md` | containers (verified), production settings, the Google Cloud deployment as executed (Cloud Run, Cloud SQL, Gemini through a service account) |
 | `docs/gcp-deploy-checklist.md` | the Google Cloud deployment with an honest status per step (the self-hosted GPU model is the one open item) |
 | `docs/interview-prep.md` | interview preparation notes for this project: pitches, STAR stories from real events, technical Q&A, honest limits (Chinese and English) |
+| `docs/fde-role-mapping.md` | requirements of two Forward Deployed Engineer roles mapped to evidence in this project, the gaps stated honestly, the project's resume entries, a delivery playbook and common questions (Chinese) |
 
 ## Run locally
 

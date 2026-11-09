@@ -23,6 +23,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import os
 import time
 import uuid
 from collections.abc import Callable
@@ -125,12 +126,21 @@ def wait_for_job(
     out: Callable[[str], None],
     timeout: float = 180,
     interval: float = 2.0,
+    headers: dict | None = None,
 ) -> dict | None:
-    """轮询任务状态直到结束，打印每次状态变化。这就是"取餐窗口"：用 202 响应里的 job_id 来取结果。"""
+    """轮询任务状态直到结束，打印每次状态变化。这就是"取餐窗口"：用 202 响应里的 job_id 来取结果。
+
+    生产环境（AUTH_REQUIRED=true）下，查任务要带 API 密钥；Webhook 本身不需要（它靠签名）。
+    密钥从环境变量 AGENT_API_KEY 读取，只用在这个轮询请求上，不会发给 Webhook，也不会被打印。
+    """
     deadline = time.monotonic() + timeout
     last = None
     while time.monotonic() < deadline:
-        job = client.get(f"{url}/jobs/{job_id}").json()
+        response = client.get(f"{url}/jobs/{job_id}", headers=headers) if headers else client.get(f"{url}/jobs/{job_id}")
+        if response.status_code in (401, 403):
+            out(f"    cannot read the job ({response.status_code}): this backend requires an API key; set AGENT_API_KEY and retry")
+            return None
+        job = response.json()
         if job["status"] != last:
             last = job["status"]
             out(f"    job {job_id[:8]}… is now {last} (attempt {job['attempts']}/{job['max_attempts']})")
@@ -192,7 +202,8 @@ def _run(
             continue
         data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
         if args.wait and data.get("status") == "queued":
-            job = wait_for_job(client, args.url, data["job_id"], out)
+            api_key = os.environ.get("AGENT_API_KEY")
+            job = wait_for_job(client, args.url, data["job_id"], out, headers={"Authorization": f"Bearer {api_key}"} if api_key else None)
             if job and job["result"]:
                 top = job["result"]["report"]["hypotheses"][0]
                 out(f"    most likely cause ({round(top['confidence'] * 100)}%): {top['root_cause']}")

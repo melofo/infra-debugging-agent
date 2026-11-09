@@ -125,7 +125,7 @@ def test_wait_polls_until_the_job_finishes_and_prints_the_result(monkeypatch):
 
     # 轮询间隔设为 0，测试不用真的睡眠。
     original = simulate_jira.wait_for_job
-    monkeypatch.setattr(simulate_jira, "wait_for_job", lambda c, u, j, o: original(c, u, j, o, interval=0))
+    monkeypatch.setattr(simulate_jira, "wait_for_job", lambda c, u, j, o, **kw: original(c, u, j, o, interval=0, **kw))
     lines: list[str] = []
     fake = httpx.Client(transport=httpx.MockTransport(handler))  # MockTransport：不联网，直接返回我们指定的响应
 
@@ -142,3 +142,36 @@ def test_the_events_it_builds_look_like_jira_payloads():
     assert body["webhookEvent"] == "jira:issue_created"
     assert body["issue"]["key"] == "BUG-1042"
     assert body["issue"]["fields"]["issuetype"]["name"] == "Bug"
+
+
+# ---------------------------------------------------------------- 生产环境：查任务要带 API 密钥
+def _job_server(seen: list):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":  # Webhook：靠签名，不需要（也不应该收到）API 密钥
+            seen.append(("webhook", request.headers.get("authorization")))
+            return httpx.Response(202, json={"status": "queued", "job_id": "abc12345-0000"})
+        seen.append(("job", request.headers.get("authorization")))
+        if request.headers.get("authorization") != "Bearer the-key":
+            return httpx.Response(401, json={"detail": "unauthorized"})
+        return httpx.Response(200, json={"status": "failed", "attempts": 1, "max_attempts": 3, "result": None, "last_error": "x"})
+
+    return handler
+
+
+def test_the_api_key_is_sent_only_when_polling_the_job_never_to_the_webhook(monkeypatch):
+    monkeypatch.setenv("AGENT_API_KEY", "the-key")
+    seen: list = []
+    fake = httpx.Client(transport=httpx.MockTransport(_job_server(seen)))
+    lines: list[str] = []
+    code = simulate_jira.main(["created", "--wait", "--url", "http://x"], client=fake, secret=SECRET, out=lines.append)
+    assert code == 0
+    assert ("webhook", None) in seen and ("job", "Bearer the-key") in seen
+    assert "the-key" not in "\n".join(lines)  # 密钥不会被打印
+
+
+def test_without_an_api_key_a_protected_backend_gives_a_clear_message_not_a_crash(monkeypatch):
+    monkeypatch.delenv("AGENT_API_KEY", raising=False)
+    fake = httpx.Client(transport=httpx.MockTransport(_job_server([])))
+    lines: list[str] = []
+    code = simulate_jira.main(["created", "--wait", "--url", "http://x"], client=fake, secret=SECRET, out=lines.append)
+    assert code == 0 and any("set AGENT_API_KEY" in line for line in lines)

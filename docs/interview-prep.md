@@ -204,6 +204,33 @@
 
 ---
 
+### G. 自托管开源模型
+
+**部署一个开源模型需要什么？**
+一个开源模型在 Hugging Face 上是一个仓库，部署它需要三类东西：
+- **Weights（权重，`*.safetensors`）：**模型学到的知识，体积最大（Gemma 4 26B 的 bf16 权重约 52 GB），决定要多大的显存。
+- **`config.json`：**模型的骨架，层数、隐藏层大小、注意力头数、上下文长度；推理引擎靠它搭出网络，权重才能放进去。
+- **`tokenizer.json`（连同聊天模板）：**语言编码规则，把文字切成 token 编号再变回文字，要和训练时完全一致，否则输出是乱码；聊天模板决定怎么把系统提示、用户消息和工具调用拼成模型认识的格式。
+> A model repository has three essential parts. The weights are the learned parameters and by far the biggest part. `config.json` is the architecture (layers, hidden size, attention heads, context length) so the runtime can build the network the weights fit into. `tokenizer.json`, with the chat template, defines how text becomes token ids and back, and it must match training exactly. An inference server such as vLLM loads all three and serves them behind an API.
+
+**Hugging Face、Ollama、vLLM、GCP 各是什么角色？**
+
+| 名称 | 角色 | 我们的用法 |
+|---|---|---|
+| Hugging Face | 存放模型三件套的仓库（类似 Maven Central） | Gemma 4 的权重、`config.json`、`tokenizer.json` |
+| Ollama | 本地运行模型的工具；把模型打成 GGUF（权重、分词规则和元数据放进一个量化后的单文件） | 本地跑 `gemma4:26b`（约 16 GB，量化过，所以笔记本能跑） |
+| vLLM | 面向生产的推理服务器，直接读 Hugging Face 格式，高并发、前缀缓存、工具调用解析 | 计划部署在 Cloud Run GPU 上，用 bf16 原始权重 |
+| GCP（Cloud Run GPU） | 提供 GPU、按用量计费、可缩到零、用 IAM 保护接口 | 计划的部署目标；还没做 |
+| OpenAI 兼容接口 | 事实标准的聊天接口，Ollama、vLLM、OpenAI 都支持 | 我们的适配器对接它，本地和云上用同一个适配器 |
+
+**部署的是开源模型，为什么用 OpenAI 的接口？**
+> "OpenAI-compatible" does not mean I call OpenAI. Open weights are just files; they have no API of their own. The serving software (Ollama, vLLM) provides the API, and most of them copied the shape of OpenAI's chat-completions JSON, which became the de facto standard, like S3-compatible storage or the SQL standard. So one adapter works against a local Ollama, a vLLM server on Cloud Run, or OpenAI itself, and only the base URL and model name change. Nothing is sent to OpenAI.
+
+要点：接口是**服务软件**提供的，不是模型提供的；开源模型自己没有"官方接口"，Ollama 也有自己的原生接口，vLLM 也有，但大家都额外兼容了 OpenAI 的格式，所以选它，换服务器不用改代码。
+
+**本地和云上的结果能直接对比吗？**
+不能直接当成同一个模型：本地 Ollama 用的是量化后的 GGUF（约 16 GB），vLLM 加载的是 bf16 原始权重（约 52 GB），精度略有差别，速度也受硬件影响（笔记本对 GPU）。对比时要说明这一点。
+
 ## 6. 难问题 / 诚实的弱点
 
 **"数据是模拟的，为什么该相信它？"**

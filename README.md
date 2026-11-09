@@ -56,6 +56,7 @@ Caveats: the scenarios are synthetic and come from one generator, 30 cases give 
 | `docs/demo-script.md` | a five-minute live demo with commands and what to say |
 | `docs/deployment.md` | containers (verified), production settings, the Google Cloud deployment as executed (Cloud Run, Cloud SQL, Gemini through a service account) |
 | `docs/gcp-deploy-checklist.md` | the Google Cloud deployment with an honest status per step (the self-hosted GPU model is the one open item) |
+| `docs/interview-prep.md` | interview preparation notes for this project: pitches, STAR stories from real events, technical Q&A, honest limits (Chinese and English) |
 
 ## Run locally
 

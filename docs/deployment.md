@@ -150,6 +150,18 @@ Billed continuously while it runs (estimates from list prices, not invoices): th
 - OpenTelemetry export to Cloud Trace (logs are JSON on stdout with `trace_id`; no collector is deployed).
 - A load test, Cloud Armor in front of the webhook, a CI deploy pipeline, high availability and backups for the database, and a migration tool.
 
+### 3.8 Planned, not executed: a self-hosted model on a GPU
+
+What hosting an open-weight model involves:
+
+> A model repository has three essential parts. **Weights** (`*.safetensors`) are the learned parameters, the "brain", and by far the biggest part (about 52 GB in bf16 for Gemma 4 26B). **`config.json`** is the architecture: layer count, hidden size, attention heads, context length, so the runtime knows how to build the network the weights fit into. **`tokenizer.json`** (with the chat template) is the language encoding: how text becomes token ids and back, which must match training exactly or the model gets garbage. An inference server such as vLLM loads all three, and serves them behind an API.
+
+The tools: Hugging Face is where the three parts are published; Ollama runs a model locally from a quantized single-file **GGUF** package (weights, tokenizer rules and metadata together; this is what was used on a laptop, about 16 GB for the 26B model); vLLM is a production inference server that reads the Hugging Face format directly (bf16 weights) and offers batching, prefix caching and a tool-call parser. The two use different artifacts, so a local result and a cloud result are not the same model at the same precision.
+
+Why an OpenAI-compatible adapter for open models: open weights have no API of their own; the serving software provides it, and Ollama and vLLM both implement the OpenAI chat-completions shape, so one adapter (`app/llm/openai_compat.py`) works for a local server, a vLLM service and OpenAI itself, with only `LLM_BASE_URL` and `LLM_MODEL` changing. Nothing is sent to OpenAI.
+
+Planned configuration (not run): the smallest Gemma 4 model (`google/gemma-4-E2B-it`) with vLLM on a Cloud Run **L4** GPU, using Google's published `pytorch-vllm-serve:gemma4` image, a **private** service (`--no-allow-unauthenticated`, so requests without an identity token never reach the container or wake the GPU), zonal redundancy off, at most one instance, scaling to zero, called by the worker with `LLM_AUTH=google-id-token`. The goal is to measure cold start, tokens per second and cost per request, not model quality: a model this small is expected to do poorly on the tool-calling task. Estimated cost for one test session is a few dollars.
+
 ## 4. Not done / honest gaps
 
 - No load test was done. CI exists (see the architecture document) but does not deploy.

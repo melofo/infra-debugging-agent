@@ -211,7 +211,7 @@
 - **Weights（权重，`*.safetensors`）：**模型学到的知识，体积最大（Gemma 4 26B 的 bf16 权重约 52 GB），决定要多大的显存。
 - **`config.json`：**模型的骨架，层数、隐藏层大小、注意力头数、上下文长度；推理引擎靠它搭出网络，权重才能放进去。
 - **`tokenizer.json`（连同聊天模板）：**语言编码规则，把文字切成 token 编号再变回文字，要和训练时完全一致，否则输出是乱码；聊天模板决定怎么把系统提示、用户消息和工具调用拼成模型认识的格式。
-> A model repository has three essential parts. The weights are the learned parameters and by far the biggest part. `config.json` is the architecture (layers, hidden size, attention heads, context length) so the runtime can build the network the weights fit into. `tokenizer.json`, with the chat template, defines how text becomes token ids and back, and it must match training exactly. An inference server such as vLLM loads all three and serves them behind an API.
+> A model repository has three essential parts. **Weights** (`*.safetensors`) are the learned parameters, the "brain", and by far the biggest part (about 52 GB in bf16 for Gemma 4 26B). **`config.json`** is the architecture: layer count, hidden size, attention heads, context length, so the runtime knows how to build the network the weights fit into. **`tokenizer.json`** (with the chat template) is the language encoding: how text becomes token ids and back, which must match training exactly or the model gets garbage. An inference server such as vLLM loads all three, and serves them behind an API.
 
 **Hugging Face、Ollama、vLLM、GCP 各是什么角色？**
 

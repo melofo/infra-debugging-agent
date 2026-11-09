@@ -14,7 +14,7 @@ What was planned, what was executed and what is still open. The commands and the
 | 6 | Deploy the API (service), the worker (worker pool), the frontend (service); knowledge ingestion as a job; first admin key through the Cloud SQL Auth Proxy | done |
 | 7 | Verify end to end | done: webhook behaviours, a full investigation, all 36 scenarios through `scripts/eval_deployed.py`, the chat UI by hand |
 | 8 | Update the documentation from "designed" to "deployed" | done (this change) |
-| 9 | Self-hosted model on a Cloud Run GPU (vLLM, private, identity-token auth) | **not done** (deliberately last: it is the expensive step) |
+| 9 | Self-hosted model on a Cloud Run GPU (vLLM, private, identity-token auth); planned configuration in `docs/deployment.md` section 3.8 | **not done** (deliberately last: it is the expensive step) |
 | 10 | Tear down and check the bill | open: the project is still running and billing |
 
 Notes:

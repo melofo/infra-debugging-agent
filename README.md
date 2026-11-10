@@ -227,7 +227,7 @@ Honest status: the first real run on GitHub went red in two places that had pass
 
 ## Observability (OpenTelemetry)
 
-Traces and metrics follow the standard OpenTelemetry model, so the same instrumentation can feed Cloud Trace, Jaeger or any OTLP backend. Application code depends only on the tiny `opentelemetry-api`; with no exporter configured (the default) every call is a no-op, so monitoring can never take a request down.
+Traces and metrics follow the standard OpenTelemetry model, so the same instrumentation can feed Cloud Trace (`OTEL_EXPORTER=gcp-trace`, used on the deployed system), Jaeger or any OTLP backend. Application code depends only on the tiny `opentelemetry-api`; with no exporter configured (the default) every call is a no-op, so monitoring can never take a request down.
 
 - **Traces:** a worker `job.process` span (attempt, outcome) contains an `agent.turn` span with one child per model call (`llm.generate`: tokens, tool-call count) and per tool call (`tool.execute`: tool name, ok, result size). Rejected reports appear as `report.rejected` events (grounding or schema). Session requests get a `session.turn` span.
 - **Metrics:** turns by outcome (ok, error, cancelled), tokens by direction, model and tool call durations, report rejections by kind, job outcomes.
@@ -325,6 +325,6 @@ Fake LLMs make the suite deterministic and free (and the test environment has th
 - Evaluation numbers come from synthetic scenarios and a keyword scorer (adjusted twice after seeing outputs); the held-out set is small. See the caveats under *Results*.
 - No rate limiting. The API key lives in `sessionStorage` in the browser (an HttpOnly cookie session would be stronger). Sessions do not use MCP.
 - Jira write-back posts to a simulated outbox; a crash exactly while posting leaves the action in `executing` for a human to check.
-- The system was deployed on Google Cloud (see `docs/deployment.md`), but there is no load test, no Cloud Trace export, no database high availability or backups, no image vulnerability scan, floating base-image tags and no schema migration tool (tables are created idempotently). A self-hosted GPU model (Gemma 4 E2B on vLLM, private, identity-token auth) was deployed and measured (cold start about 5 minutes, about 196 output tokens/s) and then deleted; it could not complete the agent task, as expected for the smallest model.
+- The system was deployed on Google Cloud (see `docs/deployment.md`), but there is no load test, no database high availability or backups, no image vulnerability scan, floating base-image tags and no schema migration tool (tables are created idempotently). A self-hosted GPU model (Gemma 4 E2B on vLLM, private, identity-token auth) was deployed and measured (cold start about 5 minutes, about 196 output tokens/s) and then deleted; it could not complete the agent task, as expected for the smallest model.
 - Free-tier Gemini quotas can throttle multi-step investigations and evaluation runs (a control run was lost to a 429).
 - Authentication uses one shared database; there is no per-tenant isolation beyond session ownership.

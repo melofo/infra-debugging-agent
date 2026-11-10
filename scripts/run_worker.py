@@ -29,7 +29,7 @@ from app.llm.factory import LLMNotConfigured, create_llm_client  # noqa: E402
 from app.logging_config import configure_logging  # noqa: E402
 from app.rag.embedder import create_embedder  # noqa: E402
 from app.rag.retrieval import KnowledgeBase  # noqa: E402
-from app.telemetry import configure_telemetry  # noqa: E402
+from app.telemetry import configure_from_settings  # noqa: E402
 from app.worker import Worker  # noqa: E402
 
 logger = logging.getLogger("run_worker")
@@ -45,7 +45,7 @@ async def run() -> int:
         print(f"Cannot start the worker: {exc}", file=sys.stderr)
         return 2
 
-    telemetry = configure_telemetry(settings.otel_exporter, settings.otel_endpoint, settings.otel_sample_ratio, settings.environment)
+    telemetry = configure_from_settings(settings)
     pool = create_pool(settings.database_url, settings.db_pool_max_size, settings.db_pool_timeout_seconds)
     await pool.open(wait=False)
     try:

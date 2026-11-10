@@ -140,7 +140,7 @@ Limits, stated plainly: the gate uses the model's self-reported confidence, whic
 - **Containers:** multi-stage images, non-root user, no secrets or test tools inside, `ENVIRONMENT=production` refuses unsafe settings at startup.
 - **CI:** backend tests against a real pgvector database (a missing database fails the run instead of skipping tests), frontend lint, type check, tests and build, a smoke test of the real containers, a non-blocking dependency audit.
 - **Deployed shape (Google Cloud):** API and frontend as Cloud Run services, the worker as a Cloud Run worker pool (same image, different start command), Cloud SQL with pgvector for queue, sessions and knowledge, one least-privilege service account used for the database connector and for Gemini, secrets in Secret Manager. Details and what was verified: `docs/deployment.md`.
-- **Observability:** traces (`job.process` > `agent.turn` > `llm.generate` and `tool.execute`), metrics, JSON logs that carry `trace_id`.
+- **Observability:** traces (`job.process` > `agent.turn` > `llm.generate` and `tool.execute`), metrics, JSON logs that carry `trace_id`. On Google Cloud the traces go straight to Cloud Trace (`OTEL_EXPORTER=gcp-trace`, runtime service account, no collector); metrics are not exported there.
 
 ## 8. What would change for a real deployment
 

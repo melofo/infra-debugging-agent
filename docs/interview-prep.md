@@ -34,7 +34,7 @@
 
 ### OpenAI FDE vs Google Cloud FDE III（侧重不同）
 - **OpenAI 方向**：强调 evals、提示/工具设计、agent 的可靠性、模型行为。重点讲：§4 故事 1–4、§5.D 评估。
-- **Google Cloud 方向**：强调 GCP 落地，**已真实部署**（见 `docs/deployment.md` 第 3 节）：Cloud Run（API、前端）、Cloud Run worker pool（同一个镜像，覆盖启动命令）、Cloud SQL for PostgreSQL + pgvector、Secret Manager、Gemini 通过服务账号调用（不存 key）、Cloud Build。部署后用 `scripts/eval_deployed.py` 验收：36 个场景走真实路径 36/36（留出集 6/6），p50 8.1 秒。诚实说明：模拟数据、没有压测、没有 Cloud Trace 导出；自托管的是最小的模型（Gemma 4 E2B，Cloud Run GPU，冷启动约 5 分钟、约 196 输出 token/秒），完成不了 agent 任务，测完已删除。队列可以换 Pub/Sub，但说明为什么现在用 Postgres。
+- **Google Cloud 方向**：强调 GCP 落地，**已真实部署**（见 `docs/deployment.md` 第 3 节）：Cloud Run（API、前端）、Cloud Run worker pool（同一个镜像，覆盖启动命令）、Cloud SQL for PostgreSQL + pgvector、Secret Manager、Gemini 通过服务账号调用（不存 key）、Cloud Build。部署后用 `scripts/eval_deployed.py` 验收：36 个场景走真实路径 36/36（留出集 6/6），p50 8.1 秒。诚实说明：模拟数据、没有压测、追踪已导出到 Cloud Trace；自托管的是最小的模型（Gemma 4 E2B，Cloud Run GPU，冷启动约 5 分钟、约 196 输出 token/秒），完成不了 agent 任务，测完已删除。队列可以换 Pub/Sub，但说明为什么现在用 Postgres。
 
 ---
 
@@ -200,7 +200,7 @@
 > OpenTelemetry spans carry metadata only: tool names, counts, token numbers, statuses. Every attribute is sanitized to numbers, booleans and short strings, and the session id, which is a bearer-style capability, is only recorded as a hash prefix. Logs carry the trace id.
 
 **怎么部署到 GCP？**
-> I deployed it on Google Cloud: the API and frontend as Cloud Run services, the worker as a Cloud Run worker pool running the same image with a different start command, Cloud SQL for PostgreSQL with pgvector, Secret Manager, and Gemini reached through the service account, so there is no model key anywhere. Afterwards I ran all 36 evaluation scenarios through the real webhook, queue, worker and model path: all correct, 8 seconds median. What I haven't done: a load test, trace export to Cloud Trace, database backups and high availability, and a self-hosted GPU model. One real decision: the worker has no HTTP port and polls the database queue, so it has to be an always-on worker pool instance; with push delivery (Pub/Sub or Cloud Tasks) it could scale to zero.
+> I deployed it on Google Cloud: the API and frontend as Cloud Run services, the worker as a Cloud Run worker pool running the same image with a different start command, Cloud SQL for PostgreSQL with pgvector, Secret Manager, and Gemini reached through the service account, so there is no model key anywhere. Afterwards I ran all 36 evaluation scenarios through the real webhook, queue, worker and model path: all correct, 8 seconds median. What I haven't done: a load test, database backups and high availability, and a self-hosted GPU model. One real decision: the worker has no HTTP port and polls the database queue, so it has to be an always-on worker pool instance; with push delivery (Pub/Sub or Cloud Tasks) it could scale to zero.
 
 ---
 
@@ -249,7 +249,7 @@
 > For an automatic first pass that posts to a ticket, yes; for interactive chat the streamed steps make the wait visible. The tail is mostly model latency and rate limits on the free tier. I'd look at caching tool results and parallel tool calls next.
 
 **"你没测什么？"**
-> Load, real connectors, trace export to Cloud Trace, and an LLM judge validated on the real model. I also didn't test other model families, and the free tier limits how many repeats I could afford.
+> Load, real connectors, and an LLM judge validated on the real model. I also didn't test other model families, and the free tier limits how many repeats I could afford.
 
 **"重来你会改什么？"**
 > Build the held-out set and the baselines first, before tuning anything, and run CI from day one: both the `.env` dependency and the lockfile problem would have shown up in the first week instead of at the end.

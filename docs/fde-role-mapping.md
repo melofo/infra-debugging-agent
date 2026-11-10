@@ -22,7 +22,7 @@
 | 2 | **评估流水线和可观测性**（准确度、安全、延迟） | 36 个生成场景 + 确定性评分器 + 无模型基线 + 留出集 + 配对符号检验；OpenTelemetry 追踪和指标（不含内容）| **强（最强项）** |
 | 3 | **RAG / 向量库**，结构化和非结构化数据 | pgvector + HNSW，runbook 和历史事故分块入库（幂等、事务性切换）；检索评估 35 条查询 | 强 |
 | 4 | **LLM 原生指标**（tokens/sec、cost-per-request）、**状态管理**、**精细追踪** | 每次调查的 token、调用次数、p50/p95 延迟、成本估算开关；会话状态存 Postgres（租约+版本号）；span 树 job→turn→模型调用→工具调用 | 强（tokens/sec 没单独量） |
-| 5 | **在 GCP 上架构 AI 系统**（最低要求） | **已真实部署**：Cloud Run（API、前端）、Cloud Run worker pool、Cloud SQL（PostgreSQL 17 + pgvector）、Secret Manager、Artifact Registry、Cloud Build；Gemini 通过服务账号调用（没有任何 API 密钥）；部署后用 36 个场景走真实的 webhook→队列→worker→模型路径验证（36/36，中位数约 8 秒）。**限制：**个人项目、模拟数据、没有客户；自托管 Gemma 4 也在 Cloud Run GPU 上部署并测过（最小的模型，测完删除）；Cloud Trace 还没做 | **强（个人项目，非客户）** |
+| 5 | **在 GCP 上架构 AI 系统**（最低要求） | **已真实部署**：Cloud Run（API、前端）、Cloud Run worker pool、Cloud SQL（PostgreSQL 17 + pgvector）、Secret Manager、Artifact Registry、Cloud Build；Gemini 通过服务账号调用（没有任何 API 密钥）；部署后用 36 个场景走真实的 webhook→队列→worker→模型路径验证（36/36，中位数约 8 秒）。**限制：**个人项目、模拟数据、没有客户；自托管 Gemma 4 也在 Cloud Run GPU 上部署并测过（最小的模型，测完删除）；追踪已导出到 Cloud Trace | **强（个人项目，非客户）** |
 | 6 | **多 agent 框架**（LangGraph、CrewAI、ADK；ReAct、自我反思、分层委派）— 加分项 | 我们的循环就是 ReAct；"报告被拒→带原因重写"类似自我反思；**已实现路由、串联、并行三种工作流**（`app/agent/workflows.py`，22 个测试，假模型验证，**没有用真实模型评估**）；专家是同一个 agent 加不同侧重点，**不是**用 ADK/LangGraph 做的 | 部分（模式有，框架没用过） |
 | 7 | **带领客户技术发现会议**（最低要求）、与客户共建 | 项目里没有（项目没有真实客户） | **⚠ 空白（见 §4）** |
 | 8 | 把现场模式沉淀成**可复用模块/给产品提需求** | grounding、eval 框架、MCP 客户端策略都是可复用模块；评估发现可转成产品反馈（见 §5） | 部分 |
@@ -57,7 +57,7 @@
 
 | 空白 | 为什么重要 | 补法 / 现在怎么说 |
 |---|---|---|
-| ~~没有真正用 GCP~~ **已补上**（Google 最低要求） | 招聘原文第一条资格是在云平台（如 GCP）上架构 AI 系统 | 已真实部署并验证，细节见 §10；自托管模型也在 Cloud Run GPU 上部署并测量过。**剩下的缺口：**追踪导出到 Cloud Trace、压力测试、更大的模型和单次调查成本。说法：*"I deployed it on Cloud Run and Cloud SQL with Gemini through a service account, measured it end to end, and also served an open model on a private Cloud Run GPU endpoint; the gaps are trace export and load testing."* |
+| ~~没有真正用 GCP~~ **已补上**（Google 最低要求） | 招聘原文第一条资格是在云平台（如 GCP）上架构 AI 系统 | 已真实部署并验证，细节见 §10；自托管模型也在 Cloud Run GPU 上部署并测量过。**剩下的缺口：**压力测试、更大的模型和单次调查成本。说法：*"I deployed it on Cloud Run and Cloud SQL with Gemini through a service account, measured it end to end, and also served an open model on a private Cloud Run GPU endpoint; traces go to Cloud Trace; the gaps are load testing and cost per investigation."* |
 | **没有多 agent 框架经验**（加分项） | JD 点名 LangGraph / CrewAI / ADK | 两个选择：(a) 做一个小对比：用 ADK 或 LangGraph 实现同一个任务，写 1 页对比；(b) 准备好立场：*"I chose a single agent on purpose; my loop implements ReAct, the grounding retry is a form of reflection, and I'd split into agents only when contexts or permissions need separating."* |
 | **没有"带领客户技术发现会议"**（Google 最低要求）| 项目是作品集，没有真实客户 | 用自己经历里和干系人沟通的**真实**例子（项目补不了这一项）；同时准备好 §6 的发现问题清单，面试官问"你会怎么做发现"时直接用 |
 | 数据源是模拟的，没有真实用户 | 面试官一定会问 | 主动说：架构和评估方法对工具接口成立，换的只是连接器；评估是合成的，所以只拿来比较版本，不宣称真实准确率 |
@@ -174,7 +174,7 @@
 - *知识库部署在哪？* 就在同一个 Cloud SQL 实例里：两张表，向量列 768 维加 HNSW 索引；导入是一次性的 Cloud Run job（切成 49 块、调用嵌入模型、写表）。
 - *worker 为什么常驻？* 我用 Postgres 当队列、轮询领任务（任务量小、要持久可查询）；代价是 worker 不能缩到零。任务量大几个数量级，或者空闲成本重要，就改成 Pub/Sub 或 Cloud Tasks 推送。
 - *API 和 worker 为什么不拆成两个镜像？* 它们共用数据模型和 agent 代码，一个镜像两个启动命令，避免版本不一致；依赖差别大或团队分开时才拆。
-- *这是生产吗？* 不是：模拟数据、没有真实用户、没有压测、数据库单可用区无备份、没有 Cloud Trace。是一个完整的、可验证的部署，不是客户上线。
+- *这是生产吗？* 不是：模拟数据、没有真实用户、没有压测、数据库单可用区无备份、追踪已导出到 Cloud Trace（指标没有）。是一个完整的、可验证的部署，不是客户上线。
 - *你自己托管过大模型吗？* 本地用 Ollama 跑过 26B 并评估；云上用 vLLM 在 Cloud Run GPU 上部署过最小的 Gemma 4（E2B），私有端点、权重来自自己的存储桶、缩到零，测了冷启动约 5 分钟和约 196 输出 token/秒，然后删除。它完成不了这个 agent 的任务，我没有假装它能；没有测更大的模型，也没有测单次调查成本。
 
-**还没做（别说成做了）**：Cloud Trace 导出、压力测试、Cloud Armor、部署流水线、数据库高可用和备份、更大的模型上云、单次调查成本。
+**还没做（别说成做了）**：压力测试、Cloud Armor、部署流水线、数据库高可用和备份、更大的模型上云、单次调查成本。

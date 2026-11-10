@@ -319,11 +319,11 @@ def test_the_application_flushes_telemetry_when_it_shuts_down(monkeypatch):
 
     seen = {}
 
-    def fake_configure(exporter, endpoint, ratio, environment):
-        seen.update(exporter=exporter, ratio=ratio)
+    def fake_configure(settings):
+        seen.update(exporter=settings.otel_exporter, ratio=settings.otel_sample_ratio)
         return Spy()
 
-    monkeypatch.setattr("app.main.configure_telemetry", fake_configure)
+    monkeypatch.setattr("app.main.configure_from_settings", fake_configure)
     with TestClient(app):
         assert Spy.stopped is False  # 运行期间不关闭
     assert Spy.stopped is True and seen == {"exporter": "none", "ratio": 1.0}
@@ -356,3 +356,112 @@ def test_the_trace_viewer_script_prints_the_tree_without_any_content(tmp_path):
     refused = subprocess.run([sys.executable, str(script), "--llm", "gemini"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
     assert refused.returncode == 2 and "Traceback" not in refused.stderr
     assert subprocess.run([sys.executable, str(script), "--scenario", "nope"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60).returncode == 2
+
+
+# ============================================================ Google Cloud Trace 导出（gcp-trace）
+class RecordingTraceExporter:
+    """代替 Google 的 CloudTraceSpanExporter：记录构造参数和收到的 span，不联网。"""
+
+    instances: list = []
+
+    def __init__(self, project_id=None, **kwargs):
+        self.project_id, self.spans = project_id, []
+        RecordingTraceExporter.instances.append(self)
+
+    def export(self, spans):
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        self.spans.extend(s.name for s in spans)
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self):
+        pass
+
+    def force_flush(self, timeout_millis=30000):
+        return True
+
+
+@pytest.fixture
+def gcp_exporter(monkeypatch):
+    import opentelemetry.exporter.cloud_trace as cloud_trace
+
+    RecordingTraceExporter.instances = []
+    monkeypatch.setattr(cloud_trace, "CloudTraceSpanExporter", RecordingTraceExporter)
+    return RecordingTraceExporter
+
+
+def test_gcp_trace_sends_spans_to_cloud_trace_with_the_project_and_flushes_on_shutdown(gcp_exporter):
+    handle = telemetry.configure_telemetry("gcp-trace", "", 1.0, "test", gcp_project="my-project")
+    with telemetry.span("root.work"):
+        with telemetry.span("child.work"):
+            pass
+    handle.shutdown()
+    [exporter] = gcp_exporter.instances
+    assert exporter.project_id == "my-project" and sorted(exporter.spans) == ["child.work", "root.work"]
+
+
+def test_gcp_trace_without_a_project_lets_the_library_infer_it_from_the_credentials(gcp_exporter):
+    telemetry.configure_telemetry("gcp-trace", "", 1.0, "test").shutdown()
+    assert gcp_exporter.instances[0].project_id is None  # 空字符串不能原样传过去（会被当成一个叫 "" 的项目）
+
+
+def test_gcp_trace_exports_traces_only_and_metric_recording_stays_a_harmless_noop(gcp_exporter):
+    handle = telemetry.configure_telemetry("gcp-trace", "", 1.0, "test", gcp_project="p")
+    assert handle.tracer_provider is not None and handle.meter_provider is not None
+    telemetry.record_job("succeeded")  # 没有指标读取器也不能报错
+    handle.shutdown()
+
+
+def test_only_gcp_trace_skips_the_metric_reader(monkeypatch, gcp_exporter):
+    import opentelemetry.sdk.metrics.export as metrics_export
+
+    built = []
+
+    class SpyReader(metrics_export.PeriodicExportingMetricReader):
+        def __init__(self, *args, **kwargs):
+            built.append(1)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(metrics_export, "PeriodicExportingMetricReader", SpyReader)
+    telemetry.configure_telemetry("gcp-trace", "", 1.0, "test", gcp_project="p").shutdown()
+    assert built == []  # Cloud Trace 只收追踪：不创建指标读取器
+    telemetry.configure_telemetry("console", "", 1.0, "test", stream=io.StringIO()).shutdown()
+    assert built == [1]  # 对照：别的导出器照常创建
+
+
+def test_gcp_trace_honours_the_sampling_ratio(gcp_exporter):
+    handle = telemetry.configure_telemetry("gcp-trace", "", 0.0, "test", gcp_project="p")
+    with telemetry.span("dropped"):
+        pass
+    handle.shutdown()
+    assert gcp_exporter.instances[0].spans == []
+
+
+def test_gcp_trace_is_an_accepted_setting_and_the_default_stays_none():
+    assert Settings(_env_file=None, otel_exporter="gcp-trace").otel_exporter == "gcp-trace"
+    assert Settings.model_fields["otel_exporter"].default == "none"
+
+
+def test_configure_from_settings_passes_every_relevant_setting_through(gcp_exporter):
+    handle = telemetry.configure_from_settings(Settings(_env_file=None, otel_exporter="gcp-trace", otel_sample_ratio=1.0, gcp_project="proj-x", environment="test"))
+    with telemetry.span("w"):
+        pass
+    handle.shutdown()
+    assert gcp_exporter.instances[0].project_id == "proj-x" and gcp_exporter.instances[0].spans == ["w"]
+
+
+def test_the_api_and_the_worker_both_use_the_shared_configuration_function():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    for source in ("app/main.py", "scripts/run_worker.py"):
+        text = (root / source).read_text(encoding="utf-8")
+        assert "configure_from_settings(settings)" in text and "configure_telemetry(" not in text, source  # 接线不能再各写一遍
+
+
+def test_configure_from_settings_honours_the_sampling_ratio_from_the_settings(gcp_exporter):
+    handle = telemetry.configure_from_settings(Settings(_env_file=None, otel_exporter="gcp-trace", otel_sample_ratio=0.0, gcp_project="p"))
+    with telemetry.span("dropped"):
+        pass
+    handle.shutdown()
+    assert gcp_exporter.instances[0].spans == []  # 比例 0：设置里的值真的生效了（不是写死的 1.0）

@@ -61,7 +61,7 @@ Set `ENVIRONMENT=production`. The application then **refuses to start** unless `
 | `WORKER_ENABLED` | run the worker inside the web process | config |
 | `AGENT_VARIANT` | `v2` (default: `list_services` tool + "beyond deploys" prompt) or `v1` (previous behavior); sessions keep the variant they were created with | config |
 | `AGENT_MAX_STEPS` | model calls allowed per turn (default 12; v2 searches more services) | config |
-| `OTEL_EXPORTER`, `OTEL_ENDPOINT`, `OTEL_SAMPLE_RATIO` | tracing/metrics | config |
+| `OTEL_EXPORTER`, `OTEL_ENDPOINT`, `OTEL_SAMPLE_RATIO` | tracing/metrics; `OTEL_EXPORTER=gcp-trace` sends traces (not metrics) straight to Google Cloud Trace using the runtime service account, with no collector | config |
 | `OTEL_EXPORTER_OTLP_HEADERS` | OTLP auth headers (standard variable, read by the exporter) | secret |
 | `PORT` | listen port (Cloud Run sets it) | platform |
 
@@ -147,8 +147,22 @@ Billed continuously while it runs (estimates from list prices, not invoices): th
 ### 3.7 Not done
 
 - A self-hosted GPU model is **not kept running**: it was deployed, measured and deleted (section 3.8). A larger model (the 26B one used locally) was not deployed, and cost per investigation was not measured because the smallest model could not complete the task.
-- OpenTelemetry export to Cloud Trace (logs are JSON on stdout with `trace_id`; no collector is deployed).
 - A load test, Cloud Armor in front of the webhook, a CI deploy pipeline, high availability and backups for the database, and a migration tool.
+
+### 3.7a Traces in Cloud Trace (executed)
+
+The application already produced OpenTelemetry spans (metadata only, no content). `OTEL_EXPORTER=gcp-trace` adds Google's own span exporter, so no collector container is deployed: it authenticates as the runtime service account, which was given only `roles/cloudtrace.agent` (the Cloud Trace API was enabled). The API and the worker share one function that builds the exporter from the settings.
+
+What one real investigation on the deployed system looks like in Cloud Trace (16 spans, taken from the trace id in the worker's JSON log line):
+
+```
+job.process                 6014 ms
+  agent.turn                5959 ms
+    llm.generate  x8        573 to 1218 ms each
+    tool.execute  x7        about 0 ms, one 198 ms (the knowledge search, which includes an embedding call)
+```
+
+Time goes to model calls; the tools are nearly free. Metrics are not exported to Cloud Trace (it takes traces only), and the logs carry `trace_id`, so a log line leads to its trace. A gotcha: the Cloud Trace v1 *list* endpoint returned nothing for a while although the traces existed; fetching a trace by id works, and the console shows them. Spans were also verified with a one-off job running the exporter against the real project.
 
 ### 3.8 A self-hosted model on a Cloud Run GPU (executed, then deleted)
 

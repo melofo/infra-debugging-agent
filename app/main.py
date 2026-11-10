@@ -26,7 +26,7 @@ from app.logging_config import configure_logging
 from app.rag.embedder import create_embedder
 from app.rag.retrieval import KnowledgeBase
 from app.rag.runtime import active_knowledge_base
-from app.telemetry import configure_telemetry
+from app.telemetry import configure_from_settings
 from app.sessions import PostgresSessionStore, SessionStore, make_registry_factory
 from app.worker import Worker
 
@@ -43,9 +43,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if not settings.auth_required:
         logger.warning("API AUTHENTICATION IS DISABLED (AUTH_REQUIRED=false). Never run like this in production.")
     # 可观测性：默认不导出（埋点是空操作）。放在最前面，这样启动过程之后的所有工作都能被追踪。
-    telemetry_handle = configure_telemetry(
-        settings.otel_exporter, settings.otel_endpoint, settings.otel_sample_ratio, settings.environment
-    )
+    telemetry_handle = configure_from_settings(settings)
     pool = create_pool(settings.database_url, settings.db_pool_max_size, settings.db_pool_timeout_seconds)
     app.state.pool = pool
 

@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     approval_ttl_hours: float = 24.0  # 提议多久不处理就过期
     # 可观测性（OpenTelemetry）。none = 不导出（默认，埋点是空操作）；console = 打印到 stderr；otlp = 发给收集器。
     # OTLP 的认证头用标准环境变量 OTEL_EXPORTER_OTLP_HEADERS 提供，不放在这里。
-    otel_exporter: Literal["none", "console", "otlp"] = "none"
+    otel_exporter: Literal["none", "console", "otlp", "gcp-trace"] = "none"  # gcp-trace = 直接发给 Google Cloud Trace（只有追踪）
     otel_endpoint: str = "http://localhost:4318"
     otel_sample_ratio: float = 1.0  # 保留多大比例的追踪（0 到 1）；高流量时调低以控制成本
 

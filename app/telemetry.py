@@ -172,8 +172,11 @@ class TelemetryHandle:
         use_providers(None, None)
 
 
-def configure_telemetry(exporter: str, endpoint: str, sample_ratio: float, environment: str, stream=None) -> TelemetryHandle:
-    """exporter: none = 不导出（默认，空操作）；console = 打印到 stderr（本地看看）；otlp = 通过 OTLP/HTTP 发给收集器。
+def configure_telemetry(
+    exporter: str, endpoint: str, sample_ratio: float, environment: str, stream=None, gcp_project: str = ""
+) -> TelemetryHandle:
+    """exporter: none = 不导出（默认，空操作）；console = 打印到 stderr（本地看看）；otlp = 通过 OTLP/HTTP 发给收集器；
+    gcp-trace = 直接发给 Google Cloud Trace（只有追踪，没有指标；用运行环境的服务账号身份，不需要收集器边车）。
 
     OTLP 的认证头等敏感配置用标准环境变量 OTEL_EXPORTER_OTLP_HEADERS 提供，由导出器自己读取，
     不放进我们的配置对象（配置对象会被打印、记日志）。
@@ -194,6 +197,13 @@ def configure_telemetry(exporter: str, endpoint: str, sample_ratio: float, envir
     if exporter == "console":
         span_exporter = ConsoleSpanExporter(out=out)
         metric_exporter = ConsoleMetricExporter(out=out)
+    elif exporter == "gcp-trace":
+        # Google 官方的追踪导出库：认证走运行环境的默认凭据（在 Cloud Run 上就是服务账号，没有密钥文件）。
+        # project_id 留空时由库从凭据里推断。Cloud Trace 只收追踪，所以不配指标读取器（指标埋点仍是空操作）。
+        from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+
+        span_exporter = CloudTraceSpanExporter(project_id=gcp_project or None)
+        metric_exporter = None
     elif exporter == "otlp":
         from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -206,6 +216,18 @@ def configure_telemetry(exporter: str, endpoint: str, sample_ratio: float, envir
 
     tracer_provider = TracerProvider(resource=resource, sampler=ParentBasedTraceIdRatio(sample_ratio))
     tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
-    meter_provider = MeterProvider(resource=resource, metric_readers=[PeriodicExportingMetricReader(metric_exporter)])
+    readers = [PeriodicExportingMetricReader(metric_exporter)] if metric_exporter is not None else []
+    meter_provider = MeterProvider(resource=resource, metric_readers=readers)
     use_providers(tracer_provider, meter_provider)
     return TelemetryHandle(tracer_provider, meter_provider)
+
+
+def configure_from_settings(settings: Any) -> TelemetryHandle:
+    """用应用设置配置追踪：API 和 worker 都调用它，接线只写一处（以前两边各写一遍，漏改一处也没有测试能发现）。"""
+    return configure_telemetry(
+        settings.otel_exporter,
+        settings.otel_endpoint,
+        settings.otel_sample_ratio,
+        settings.environment,
+        gcp_project=settings.gcp_project,
+    )

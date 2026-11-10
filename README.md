@@ -53,7 +53,7 @@ Caveats: the scenarios are synthetic and come from one generator, 30 cases give 
 |---|---|
 | `docs/architecture.md` | component and sequence diagrams, trust boundaries, data model, decisions and trade-offs, failure modes, what would change for production |
 | `docs/evaluation-report.md` | dataset design, scoring, reference lines, results with the real model, cost and latency, retrieval evaluation, threats to validity |
-| `docs/demo-script.md` | a five-minute live demo with commands and what to say |
+| `docs/demo-script.md` | a five-minute live demo (run locally) with commands and what to say |
 | `docs/deployment.md` | containers (verified), production settings, the Google Cloud deployment as executed (Cloud Run, Cloud SQL, Gemini through a service account) |
 | `docs/gcp-deploy-checklist.md` | the Google Cloud deployment with an honest status per step (including a self-hosted GPU model that was deployed, measured and deleted) |
 | `docs/interview-prep.md` | interview preparation notes for this project: pitches, STAR stories from real events, technical Q&A, honest limits (Chinese and English) |

@@ -142,7 +142,7 @@ gcloud run services update agent-api --update-env-vars "^@^CORS_ORIGINS=[\"https
 
 ### 3.6 Cost and clean-up
 
-Billed continuously while it runs (estimates from list prices, not invoices): the Cloud SQL instance (about $1 a day) and the always-on worker (about $1.70 a day); the API and frontend scale to zero. A budget alert does **not** cap spending. Clean-up is deleting the project (`gcloud projects delete`), which removes everything in it; do not link billing to a project that holds an API key you still rely on.
+While it ran, the continuously billed parts were (estimates from list prices, not invoices) the Cloud SQL instance (about $1 a day) and the always-on worker (about $1.70 a day); the API and frontend scale to zero. A budget alert does **not** cap spending. Clean-up is deleting the project (`gcloud projects delete`), which removes everything in it; do not link billing to a project that holds an API key you still rely on.
 
 **Outcome.** After the measurements and the evidence (resource inventory, a real trace, service logs and the evaluation results) were saved, the whole project was shut down with `gcloud projects delete` (it is soft-deleted for 30 days and then removed), so nothing in this document is still running and there is no live URL. The billing console, checked the day after the work, showed about $1.10 for November 1 to 9 ($0.98 after discounts), of which $0.24 was Gemini 3.5 Flash Lite for the 36-scenario evaluation and the other investigations; that is lower than the $3 to $3.5 GPU estimate above, and cost reports lag by hours to a day, so the figure may have been incomplete. At about 50 Gemini investigations the model cost is roughly half a cent each (an estimate: the number of investigations is approximate).
 

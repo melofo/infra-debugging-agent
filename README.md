@@ -43,7 +43,7 @@ Measured, with their limits stated. Details in *End-to-end evaluation* below.
 | Retrieval (35 labeled queries) | vector search hit@3 1.00 vs BM25 0.80; on queries sharing almost no words with their answer 1.00 vs 0.25 |
 | Deployed on Google Cloud (Cloud Run + Cloud SQL, Gemini via service account), 36 scenarios through the real webhook-queue-worker path | 36/36 Top-1 (held-out 6/6), 7.0 model calls and ~16k input tokens per investigation, p50 8.1 s / p95 10.9 s end to end; one run per scenario, synthetic data |
 | Self-hosted open model (Gemma 4 26B via Ollama, local), held-out set | 9/18 at first (all failures were the step budget; 25 invalid-format rejections), 13/18 after expanding JSON Schema references in the adapter; Gemini 18/18 |
-| Tests | 881 backend and 45 frontend tests, mutation-checked; CI green |
+| Tests | 896 backend and 45 frontend tests, mutation-checked; CI green |
 
 Caveats: the scenarios are synthetic and come from one generator, 30 cases give wide intervals, keyword scoring is coarse, and the step-budget control run failed because of a Gemini quota error. Numbers are good for comparing versions of this agent, not for claiming real-world accuracy.
 
@@ -58,7 +58,7 @@ Caveats: the scenarios are synthetic and come from one generator, 30 cases give 
 | `docs/gcp-deploy-checklist.md` | the Google Cloud deployment with an honest status per step (including a self-hosted GPU model that was deployed, measured and deleted) |
 | `docs/interview-prep.md` | interview preparation notes for this project: pitches, STAR stories from real events, technical Q&A, honest limits (Chinese and English) |
 | `docs/fde-role-mapping.md` | requirements of two Forward Deployed Engineer roles mapped to evidence in this project, the gaps stated honestly, the project's resume entries, a delivery playbook and common questions (Chinese) |
-| `docs/resume-bullets.md` | the project's resume entries (final wording), the self-hosted model entry with its done and planned parts, and what must not be claimed (Chinese and English) |
+| `docs/resume-bullets.md` | the project's resume entries (final wording), the self-hosted model entry (local and Cloud Run GPU, both measured), and what must not be claimed (Chinese and English) |
 
 ## Run locally
 
@@ -238,6 +238,7 @@ Traces and metrics follow the standard OpenTelemetry model, so the same instrume
 ```bash
 OTEL_EXPORTER=console .venv/bin/uvicorn app.main:app      # spans and metrics printed to stderr
 OTEL_EXPORTER=otlp OTEL_ENDPOINT=http://localhost:4318 ... # OTLP/HTTP to a collector (auth headers via the standard OTEL_EXPORTER_OTLP_HEADERS)
+OTEL_EXPORTER=gcp-trace GCP_PROJECT=my-project ...         # straight to Google Cloud Trace with the runtime service account (traces only, no collector)
 .venv/bin/python scripts/show_trace.py --llm gemini --scenario bug-2010   # one investigation as an indented span tree with timings
 ```
 

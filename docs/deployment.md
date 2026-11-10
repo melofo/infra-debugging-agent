@@ -1,6 +1,6 @@
 # Deployment
 
-Two parts, both executed. **Local containers** were built and exercised for real (see "What was verified"). The **Google Cloud** part (section 3) was executed in a dedicated project: Cloud Run (API, worker pool, frontend), Cloud SQL with pgvector, Secret Manager, Artifact Registry and Cloud Build, with Gemini reached through the service account (no API key). A self-hosted model on a Cloud Run GPU is **not** done yet (section 3.7).
+Two parts, both executed. **Local containers** were built and exercised for real (see "What was verified"). The **Google Cloud** part (section 3) was executed in a dedicated project: Cloud Run (API, worker pool, frontend), Cloud SQL with pgvector, Secret Manager, Artifact Registry and Cloud Build, with Gemini reached through the service account (no API key). A self-hosted model on a Cloud Run GPU was also deployed, measured and deleted (section 3.8), and traces are exported to Cloud Trace (section 3.7a).
 
 ## 1. Run everything in containers locally
 

@@ -30,11 +30,11 @@
 | 评估思维 | 基线（上限、下限）、留出集、配对符号检验、评分器自身的测试、承认评分器调过 |
 | 和客户沟通取舍 | 每个决定有"替代方案/为什么/代价"（`docs/architecture.md` 第 5 节） |
 | 排查和诊断能力 | CI 红灯时先看日志再改；启动竞态是复现出来的；每个误判都对着模型原话审计 |
-| 诚实 | 评分器调过两次、对照实验作废、数据是模拟的、没有真实用户和压测、自托管 GPU 模型还没部署，全部主动说 |
+| 诚实 | 评分器调过两次、对照实验作废、数据是模拟的、没有真实用户和压测、云上自托管的是最小的模型（完成不了 agent 任务）且已删除，全部主动说 |
 
 ### OpenAI FDE vs Google Cloud FDE III（侧重不同）
 - **OpenAI 方向**：强调 evals、提示/工具设计、agent 的可靠性、模型行为。重点讲：§4 故事 1–4、§5.D 评估。
-- **Google Cloud 方向**：强调 GCP 落地，**已真实部署**（见 `docs/deployment.md` 第 3 节）：Cloud Run（API、前端）、Cloud Run worker pool（同一个镜像，覆盖启动命令）、Cloud SQL for PostgreSQL + pgvector、Secret Manager、Gemini 通过服务账号调用（不存 key）、Cloud Build。部署后用 `scripts/eval_deployed.py` 验收：36 个场景走真实路径 36/36（留出集 6/6），p50 8.1 秒。诚实说明：模拟数据、没有压测、没有 Cloud Trace 导出、自托管 GPU 模型还没做。队列可以换 Pub/Sub，但说明为什么现在用 Postgres。
+- **Google Cloud 方向**：强调 GCP 落地，**已真实部署**（见 `docs/deployment.md` 第 3 节）：Cloud Run（API、前端）、Cloud Run worker pool（同一个镜像，覆盖启动命令）、Cloud SQL for PostgreSQL + pgvector、Secret Manager、Gemini 通过服务账号调用（不存 key）、Cloud Build。部署后用 `scripts/eval_deployed.py` 验收：36 个场景走真实路径 36/36（留出集 6/6），p50 8.1 秒。诚实说明：模拟数据、没有压测、没有 Cloud Trace 导出；自托管的是最小的模型（Gemma 4 E2B，Cloud Run GPU，冷启动约 5 分钟、约 196 输出 token/秒），完成不了 agent 任务，测完已删除。队列可以换 Pub/Sub，但说明为什么现在用 Postgres。
 
 ---
 
@@ -219,8 +219,8 @@
 |---|---|---|
 | Hugging Face | 存放模型三件套的仓库（类似 Maven Central） | Gemma 4 的权重、`config.json`、`tokenizer.json` |
 | Ollama | 本地运行模型的工具；把模型打成 GGUF（权重、分词规则和元数据放进一个量化后的单文件） | 本地跑 `gemma4:26b`（约 16 GB，量化过，所以笔记本能跑） |
-| vLLM | 面向生产的推理服务器，直接读 Hugging Face 格式，高并发、前缀缓存、工具调用解析 | 计划部署在 Cloud Run GPU 上，用 bf16 原始权重 |
-| GCP（Cloud Run GPU） | 提供 GPU、按用量计费、可缩到零、用 IAM 保护接口 | 计划的部署目标；还没做 |
+| vLLM | 面向生产的推理服务器，直接读 Hugging Face 格式，高并发、前缀缓存、工具调用解析 | 已部署在 Cloud Run GPU 上（Gemma 4 E2B，bf16），测完删除 |
+| GCP（Cloud Run GPU） | 提供 GPU、按用量计费、可缩到零、用 IAM 保护接口 | 已用：私有服务加身份令牌；冷启动约 5 分钟，吞吐约 196 输出 token/秒；权重放在自己的存储桶，不依赖运行时从 Hugging Face 下载 |
 | OpenAI 兼容接口 | 事实标准的聊天接口，Ollama、vLLM、OpenAI 都支持 | 我们的适配器对接它，本地和云上用同一个适配器 |
 
 **部署的是开源模型，为什么用 OpenAI 的接口？**
@@ -258,7 +258,7 @@
 
 ## 7. 如果继续做（可以直接说）
 1. 接真实的 Jira、日志（如 Cloud Logging）、Git/CI 连接器，每个只读凭证。
-2. ~~Vertex AI 上的 Gemini~~（已完成：服务账号身份，部署在 Google Cloud 上）；自托管的开源模型放到 Cloud Run GPU（适配器已有，部署还没做）。
+2. ~~Vertex AI 上的 Gemini~~ 和 ~~自托管模型上云~~（都已完成；云上的是最小的模型，更大的模型和每次调查的成本没有测）。
 3. 用真实历史事故建评估集；LLM 裁判作为二次意见；更多模型对比。
 4. 工具结果缓存与并行工具调用，降低延迟和 token。
 5. Cookie 会话 + SSO；Alembic 迁移；审计表的只插入数据库角色；限流；压测；镜像扫描、固定摘要。

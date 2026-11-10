@@ -11,36 +11,33 @@
 
 **短版（两条，一页放不下时用）：**第 1 条加第 3 条。
 
-## 自托管开源模型（本地已做，云上是计划）
+## 自托管开源模型（本地和云上都已做）
 
-**状态：** 本地 = 已完成并评估；Cloud Run GPU = **计划，还没做**。简历里只能写已完成的；计划部分做完、拿到真实数字之后才能加进去。
+**状态：** 本地（Ollama，Gemma 4 26B 量化）= 已完成并评估；Cloud Run GPU（vLLM，Gemma 4 **E2B**，最小的模型）= **已部署、测量、然后删除**。
 
-**A. 现在就能用（只含已完成的本地部分）**
-> Self-hosted an open-weight model (Gemma 4 26B, quantized) locally with Ollama behind an OpenAI-compatible API, connected it to the agent through a provider adapter, and benchmarked it against Gemini on a held-out set, diagnosing its structured-output failures (format rejections 25 → 0).
+**条目（可以直接贴）**
+> Self-hosted open-weight Gemma 4 both locally (Ollama, 26B quantized) and on Cloud Run GPUs (vLLM, E2B in bf16) behind an OpenAI-compatible API, connected through a provider adapter that left the agent loop unchanged; benchmarked the local model against Gemini on a held-out set and diagnosed its structured-output failures (format rejections 25 → 0); on Cloud Run, served it as a private endpoint protected by service-account identity tokens, with weights mounted from a project bucket and scale-to-zero, and measured a cold start of about 5 minutes and about 196 output tokens/s.
 
-**B. 云上部分做完之后追加（模板：尖括号里的数字必须用真实测量值替换；没有数字就不要加）**
-> ... then deployed a Gemma 4 model (weights, `config.json` and tokenizer from Hugging Face) on Cloud Run GPUs with vLLM as a private service protected by service-account identity tokens that scales to zero, measuring cold start (<X> s), throughput (<Y> output tokens/s) and cost per investigation ($<Z>) against the Gemini API.
+**一句短版（一页放不下时）**
+> Deployed Gemma 4 on Cloud Run GPUs with vLLM as a private, identity-token-protected service that scales to zero (cold start about 5 min, about 196 output tokens/s), and benchmarked a locally hosted 26B model against Gemini on a held-out set.
 
-**C. 两部分合并后的完整一句（做完之后用）**
-> Self-hosted open-weight Gemma 4 both locally (Ollama, quantized) and on Cloud Run GPUs (vLLM, private endpoint with service-account identity tokens, scaling to zero) behind an OpenAI-compatible API, connected through a provider adapter that left the agent loop unchanged; benchmarked it against Gemini on a held-out set, diagnosed its structured-output failures (format rejections 25 → 0), and measured cold start, throughput and cost per investigation.
+**实测的数字（出处：`docs/deployment.md` 3.8 节）**
 
-**云上部分要测什么（计划，做的时候逐项记下数字）**
+| 指标 | 结果 |
+|---|---|
+| 私有性 | 不带令牌 403；带令牌 200；云上 worker 只用自己的服务账号也是 200 |
+| 冷启动 | 缩到零之后约 4 分 54 秒（两次一致）；最开始那次（节点上还没有镜像）9 分 36 秒 |
+| 缩到零 | 最后一次请求后约 5 分钟自己关闭 |
+| 吞吐 | 单路约 196 输出 token/秒（三次：195.6、196.1、196.7） |
+| 工具调用 | 带函数定义的请求，正确解析出 `search_logs` 调用 |
+| 单价（估算） | GPU 实例按目录价约 $3.2/小时，单路约相当于每百万输出 token $4.5；比托管 API 贵，因为单路请求让 GPU 大部分时间空闲 |
+| agent 在这个模型上 | 2 个留出场景 0 个完成（步数用完）；最小的模型，预期如此，不是目标。所以**没有**单次调查成本 |
 
-| 指标 | 怎么测 | 填进哪里 |
-|---|---|---|
-| 冷启动时间 | 缩到零之后第一个请求，从发出到收到第一个回答 | B 里的 `<X>` |
-| 吞吐（输出 token/秒） | 一次调查的输出 token 数 ÷ 模型调用的时间，取多次中位数 | `<Y>` |
-| 单次调查成本 | GPU 计费秒数 × 单价 ÷ 调查次数（单价以官方价格页为准，写明是估算） | `<Z>` |
-| 对比 | 同样的场景在 Gemini 上的 token 数和延迟（已有：约 8 秒、约 1.6 万输入 token） | 对比句 |
-| 私有性 | 不带令牌的请求返回 401/403，且不会唤醒 GPU | 验证项，不写进简历 |
-| 缩到零 | 空闲一段时间后实例数为 0 | 验证项 |
-| 准确率 | 只跑一个很小的场景集；小模型预期很差，**不是目标** | 如实记录，不吹 |
-
-**面试里被追问云上部分时（计划做完之前）怎么说：** "本地我做过并评估了；云上的 GPU 部署我设计好了配置和测量方案，因为成本放在了最后，还没执行。" 不要把计划说成已做。
+**面试里怎么说（云上部分）：** "我部署了、测了、删了。最小的模型完成不了这个 agent 的任务，我也没有假装它能；重点是部署本身的工程：L4 没配额只能换 RTX、匿名从 Hugging Face 下载被 429 限流所以把权重放进自己的存储桶、私有端点用身份令牌、缩到零和冷启动、以及一个镜像版本比配置旧导致的 403。"
 
 ## 不要写（会被追问穿）
 
-- 自托管模型已经部署到 GPU（还没做，做完前只能写本地部分，见上一节 A）；支持 Claude。
+- 云上的小模型能完成 agent 任务（实测 0/2）；单次调查成本（没测）；把 26B 部署到云上（没做）；支持 Claude。
 - "LLM-judge second opinion" 只实现了，没有在真实模型上验证，被问到答 implemented, not yet validated；一页放不下就删它。
 - 36/36 是部署验收：每个场景一次、合成数据、开发集评分器调过，可信的是留出集 6/6。
 - ranking 是模型自报的置信度（0 到 1）按代码排序，旧配置在留出集上校准差距为 +0.85，不要说成"我做了排序算法"。

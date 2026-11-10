@@ -146,21 +146,42 @@ Billed continuously while it runs (estimates from list prices, not invoices): th
 
 ### 3.7 Not done
 
-- A self-hosted open model on a Cloud Run GPU (planned: vLLM, private service, identity-token auth; the adapter for it exists and is tested, see section 5.6 of the evaluation report for the local-model results).
+- A self-hosted GPU model is **not kept running**: it was deployed, measured and deleted (section 3.8). A larger model (the 26B one used locally) was not deployed, and cost per investigation was not measured because the smallest model could not complete the task.
 - OpenTelemetry export to Cloud Trace (logs are JSON on stdout with `trace_id`; no collector is deployed).
 - A load test, Cloud Armor in front of the webhook, a CI deploy pipeline, high availability and backups for the database, and a migration tool.
 
-### 3.8 Planned, not executed: a self-hosted model on a GPU
+### 3.8 A self-hosted model on a Cloud Run GPU (executed, then deleted)
 
 What hosting an open-weight model involves:
 
 > A model repository has three essential parts. **Weights** (`*.safetensors`) are the learned parameters, the "brain", and by far the biggest part (about 52 GB in bf16 for Gemma 4 26B). **`config.json`** is the architecture: layer count, hidden size, attention heads, context length, so the runtime knows how to build the network the weights fit into. **`tokenizer.json`** (with the chat template) is the language encoding: how text becomes token ids and back, which must match training exactly or the model gets garbage. An inference server such as vLLM loads all three, and serves them behind an API.
 
-The tools: Hugging Face is where the three parts are published; Ollama runs a model locally from a quantized single-file **GGUF** package (weights, tokenizer rules and metadata together; this is what was used on a laptop, about 16 GB for the 26B model); vLLM is a production inference server that reads the Hugging Face format directly (bf16 weights) and offers batching, prefix caching and a tool-call parser. The two use different artifacts, so a local result and a cloud result are not the same model at the same precision.
+The tools: Hugging Face is where the three parts are published; Ollama runs a model locally from a quantized single-file **GGUF** package (weights, tokenizer rules and metadata together; used on a laptop, about 16 GB for the 26B model); vLLM is a production inference server that reads the Hugging Face format directly (bf16 weights) and offers batching, prefix caching and a tool-call parser. The two use different artifacts, so a local result and a cloud result are not the same model at the same precision. Open weights have no API of their own: the serving software provides it, and Ollama and vLLM both implement the OpenAI chat-completions shape, so one adapter (`app/llm/openai_compat.py`) serves a local server, a vLLM service and OpenAI itself with only `LLM_BASE_URL` and `LLM_MODEL` changing. Nothing is sent to OpenAI.
 
-Why an OpenAI-compatible adapter for open models: open weights have no API of their own; the serving software provides it, and Ollama and vLLM both implement the OpenAI chat-completions shape, so one adapter (`app/llm/openai_compat.py`) works for a local server, a vLLM service and OpenAI itself, with only `LLM_BASE_URL` and `LLM_MODEL` changing. Nothing is sent to OpenAI.
+**What was run (November 2026).** The smallest Gemma 4 model (`google/gemma-4-E2B-it`, bf16, about 10 GB) with vLLM (Google's published `pytorch-vllm-serve:gemma4` image) as a **private** Cloud Run service on an **RTX PRO 6000** GPU (zonal redundancy off, at most one instance, scaling to zero). The goal was the deployment and its measurements, not model quality. The weights, `config.json` and tokenizer files were copied once into a private Cloud Storage bucket and mounted read-only, and the server ran with `HF_HUB_OFFLINE=1`, so nothing is downloaded at start. The service account that runs the model holds no project roles; it can only read that bucket. The worker's service account was given `roles/run.invoker` on the model service and called it with `LLM_AUTH=google-id-token`.
 
-Planned configuration (not run): the smallest Gemma 4 model (`google/gemma-4-E2B-it`) with vLLM on a Cloud Run **L4** GPU, using Google's published `pytorch-vllm-serve:gemma4` image, a **private** service (`--no-allow-unauthenticated`, so requests without an identity token never reach the container or wake the GPU), zonal redundancy off, at most one instance, scaling to zero, called by the worker with `LLM_AUTH=google-id-token`. The goal is to measure cold start, tokens per second and cost per request, not model quality: a model this small is expected to do poorly on the tool-calling task. Estimated cost for one test session is a few dollars.
+**Where the pieces live in the Google Cloud console.** The model server is a Cloud Run **service** (it answers HTTP), so it appears under Cloud Run, Services, next to the API and the frontend, with a GPU shown in its configuration; the worker is a **worker pool** because it serves no HTTP. The container image is Google's published vLLM image, pulled from Google's public registry, so it is not in the project's own Artifact Registry (which holds only the `backend` and `frontend` images built here). The weights are plain files in a Cloud Storage bucket, mounted into the container. Once the service is deleted it no longer appears; its history remains in Cloud Logging (about 30 days) and in the project's activity log.
+
+| Measurement | Result |
+|---|---|
+| Private endpoint | no token: 403; with an identity token: 200; the worker, using only its own service account, got 200 on its calls |
+| Cold start, very first (image not yet on the node) | 9 min 36 s from instance start to ready |
+| Cold start after scale to zero (twice) | 4 min 54 s and 4 min 53 s: about 70 s of container start, 165 s reading 10 GB of weights from the bucket, about 50 s of engine initialisation |
+| Scale to zero | the instance shut itself down about 5 minutes after its last request |
+| Output throughput | about 196 tokens/s for one stream (three runs: 195.6, 196.1, 196.7); a 400-token answer in 2.0 s |
+| Tool calling | a request with a function definition returned a correctly parsed `search_logs` call (0.3 s) |
+| Hourly cost | about $3.2 for the GPU instance at list price (a third-party figure, check the pricing page); at one stream that is roughly $4.5 per million output tokens, higher than a hosted API would charge, because a single stream leaves the GPU mostly idle |
+| The agent on this model | 0 of 2 held-out scenarios finished (the turn ran out of steps); expected for the smallest model and not the aim. Cost per investigation was therefore not measured |
+
+**What went wrong first (the useful part).**
+
+- The requested **L4** GPU was rejected at validation (no quota in a new project, with or without zonal redundancy); the RTX PRO 6000 had quota, so the final run used it, at about three times the hourly price.
+- First attempt: the startup probe budget was shorter than the start-up, so the instance was killed.
+- Second attempt: the server downloaded the weights from Hugging Face at start and was answered **429 Too Many Requests** (anonymous downloads from Cloud Run's shared addresses are rate limited); vLLM crashed. Fix: copy the weights into a bucket in the project and mount it; it also removes an external dependency at start and made later cold starts faster.
+- The worker was first refused with 403 because the running image predated the `LLM_AUTH` setting, so it sent no token. A one-off job with the same service account got 200, which isolated the cause; rebuilding the image fixed it.
+- A request that arrives while the service is scaled to zero waits for the cold start and the front end can answer 500; clients need a long timeout and retries, or a minimum instance.
+
+**Cost and clean-up.** About 60 to 65 minutes of GPU time in total over all attempts, an estimated $3 to $3.5, more than planned because of the failed attempts and a few warm minutes while debugging (an estimate from list prices, not an invoice). The model service was deleted afterwards; the bucket with the weights (about 10 GB, a few cents a month) remains until the project is deleted. After the test the worker was returned to Gemini and an end-to-end investigation was verified again.
 
 ## 4. Not done / honest gaps
 

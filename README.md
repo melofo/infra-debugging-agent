@@ -55,7 +55,7 @@ Caveats: the scenarios are synthetic and come from one generator, 30 cases give 
 | `docs/evaluation-report.md` | dataset design, scoring, reference lines, results with the real model, cost and latency, retrieval evaluation, threats to validity |
 | `docs/demo-script.md` | a five-minute live demo with commands and what to say |
 | `docs/deployment.md` | containers (verified), production settings, the Google Cloud deployment as executed (Cloud Run, Cloud SQL, Gemini through a service account) |
-| `docs/gcp-deploy-checklist.md` | the Google Cloud deployment with an honest status per step (the self-hosted GPU model is the one open item) |
+| `docs/gcp-deploy-checklist.md` | the Google Cloud deployment with an honest status per step (including a self-hosted GPU model that was deployed, measured and deleted) |
 | `docs/interview-prep.md` | interview preparation notes for this project: pitches, STAR stories from real events, technical Q&A, honest limits (Chinese and English) |
 | `docs/fde-role-mapping.md` | requirements of two Forward Deployed Engineer roles mapped to evidence in this project, the gaps stated honestly, the project's resume entries, a delivery playbook and common questions (Chinese) |
 | `docs/resume-bullets.md` | the project's resume entries (final wording), the self-hosted model entry with its done and planned parts, and what must not be claimed (Chinese and English) |
@@ -325,6 +325,6 @@ Fake LLMs make the suite deterministic and free (and the test environment has th
 - Evaluation numbers come from synthetic scenarios and a keyword scorer (adjusted twice after seeing outputs); the held-out set is small. See the caveats under *Results*.
 - No rate limiting. The API key lives in `sessionStorage` in the browser (an HttpOnly cookie session would be stronger). Sessions do not use MCP.
 - Jira write-back posts to a simulated outbox; a crash exactly while posting leaves the action in `executing` for a human to check.
-- The system was deployed on Google Cloud (see `docs/deployment.md`), but there is no load test, no Cloud Trace export, no database high availability or backups, no image vulnerability scan, floating base-image tags and no schema migration tool (tables are created idempotently). A self-hosted GPU model is not deployed yet.
+- The system was deployed on Google Cloud (see `docs/deployment.md`), but there is no load test, no Cloud Trace export, no database high availability or backups, no image vulnerability scan, floating base-image tags and no schema migration tool (tables are created idempotently). A self-hosted GPU model (Gemma 4 E2B on vLLM, private, identity-token auth) was deployed and measured (cold start about 5 minutes, about 196 output tokens/s) and then deleted; it could not complete the agent task, as expected for the smallest model.
 - Free-tier Gemini quotas can throttle multi-step investigations and evaluation runs (a control run was lost to a 429).
 - Authentication uses one shared database; there is no per-tenant isolation beyond session ownership.

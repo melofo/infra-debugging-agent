@@ -1,6 +1,6 @@
 # Deployment
 
-Two parts, both executed. **Local containers** were built and exercised for real (see "What was verified"). The **Google Cloud** part (section 3) was executed in a dedicated project: Cloud Run (API, worker pool, frontend), Cloud SQL with pgvector, Secret Manager, Artifact Registry and Cloud Build, with Gemini reached through the service account (no API key). A self-hosted model on a Cloud Run GPU was also deployed, measured and deleted (section 3.8), and traces are exported to Cloud Trace (section 3.7a).
+Two parts, both executed (the cloud project was deleted afterwards, see section 3.6). **Local containers** were built and exercised for real (see "What was verified"). The **Google Cloud** part (section 3) was executed in a dedicated project: Cloud Run (API, worker pool, frontend), Cloud SQL with pgvector, Secret Manager, Artifact Registry and Cloud Build, with Gemini reached through the service account (no API key). A self-hosted model on a Cloud Run GPU was also deployed, measured and deleted (section 3.8), and traces are exported to Cloud Trace (section 3.7a).
 
 ## 1. Run everything in containers locally
 
@@ -144,6 +144,8 @@ gcloud run services update agent-api --update-env-vars "^@^CORS_ORIGINS=[\"https
 
 Billed continuously while it runs (estimates from list prices, not invoices): the Cloud SQL instance (about $1 a day) and the always-on worker (about $1.70 a day); the API and frontend scale to zero. A budget alert does **not** cap spending. Clean-up is deleting the project (`gcloud projects delete`), which removes everything in it; do not link billing to a project that holds an API key you still rely on.
 
+**Outcome.** After the measurements and the evidence (resource inventory, a real trace, service logs and the evaluation results) were saved, the whole project was shut down with `gcloud projects delete` (it is soft-deleted for 30 days and then removed), so nothing in this document is still running and there is no live URL. The billing console, checked the day after the work, showed about $1.10 for November 1 to 9 ($0.98 after discounts), of which $0.24 was Gemini 3.5 Flash Lite for the 36-scenario evaluation and the other investigations; that is lower than the $3 to $3.5 GPU estimate above, and cost reports lag by hours to a day, so the figure may have been incomplete. At about 50 Gemini investigations the model cost is roughly half a cent each (an estimate: the number of investigations is approximate).
+
 ### 3.7 Not done
 
 - A self-hosted GPU model is **not kept running**: it was deployed, measured and deleted (section 3.8). A larger model (the 26B one used locally) was not deployed, and cost per investigation was not measured because the smallest model could not complete the task.
@@ -153,13 +155,13 @@ Billed continuously while it runs (estimates from list prices, not invoices): th
 
 The application already produced OpenTelemetry spans (metadata only, no content). `OTEL_EXPORTER=gcp-trace` adds Google's own span exporter, so no collector container is deployed: it authenticates as the runtime service account, which was given only `roles/cloudtrace.agent` (the Cloud Trace API was enabled). The API and the worker share one function that builds the exporter from the settings.
 
-What one real investigation on the deployed system looks like in Cloud Trace (16 spans, taken from the trace id in the worker's JSON log line):
+What one real investigation on the deployed system looks like in Cloud Trace (16 spans: the job, the turn, 8 model calls and 6 tool calls, taken from the trace id in the worker's JSON log line):
 
 ```
 job.process                 6014 ms
   agent.turn                5959 ms
     llm.generate  x8        573 to 1218 ms each
-    tool.execute  x7        about 0 ms, one 198 ms (the knowledge search, which includes an embedding call)
+    tool.execute  x6        about 0 ms, one 198 ms (the knowledge search, which includes an embedding call)
 ```
 
 Time goes to model calls; the tools are nearly free. Metrics are not exported to Cloud Trace (it takes traces only), and the logs carry `trace_id`, so a log line leads to its trace. A gotcha: the Cloud Trace v1 *list* endpoint returned nothing for a while although the traces existed; fetching a trace by id works, and the console shows them. Spans were also verified with a one-off job running the exporter against the real project.
@@ -195,7 +197,7 @@ The tools: Hugging Face is where the three parts are published; Ollama runs a mo
 - The worker was first refused with 403 because the running image predated the `LLM_AUTH` setting, so it sent no token. A one-off job with the same service account got 200, which isolated the cause; rebuilding the image fixed it.
 - A request that arrives while the service is scaled to zero waits for the cold start and the front end can answer 500; clients need a long timeout and retries, or a minimum instance.
 
-**Cost and clean-up.** About 60 to 65 minutes of GPU time in total over all attempts, an estimated $3 to $3.5, more than planned because of the failed attempts and a few warm minutes while debugging (an estimate from list prices, not an invoice). The model service was deleted afterwards; the bucket with the weights (about 10 GB, a few cents a month) remains until the project is deleted. After the test the worker was returned to Gemini and an end-to-end investigation was verified again.
+**Cost and clean-up.** About 60 to 65 minutes of GPU time in total over all attempts, an estimated $3 to $3.5, more than planned because of the failed attempts and a few warm minutes while debugging (an estimate from list prices, not an invoice). The model service was deleted afterwards; the bucket with the weights went with the project deletion. After the test the worker was returned to Gemini and an end-to-end investigation was verified again.
 
 ## 4. Not done / honest gaps
 

@@ -16,7 +16,7 @@ What was planned, what was executed and what is still open. The commands and the
 | 8 | Update the documentation from "designed" to "deployed" | done (this change) |
 | 9 | Self-hosted model on a Cloud Run GPU (vLLM, private, identity-token auth), weights from a project bucket | done and then deleted: measurements and what failed first are in `docs/deployment.md` section 3.8 (RTX PRO 6000 because the L4 had no quota; the smallest model could not complete the agent task, as expected) |
 | 9b | Traces exported to Cloud Trace (`OTEL_EXPORTER=gcp-trace`, `roles/cloudtrace.agent`) | done: one real investigation seen as a 16-span tree (`docs/deployment.md` section 3.7a) |
-| 10 | Tear down and check the bill | open: the project is still running and billing |
+| 10 | Tear down and check the bill | done: evidence exported, then the whole project shut down; the console showed about $0.98 for November 1 to 9 (possibly incomplete, see `docs/deployment.md` section 3.6) |
 
 Notes:
 
